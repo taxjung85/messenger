@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "카카오톡 채널 AI 추천 사이드바",
   "description": "카카오톡 채널 관리자 센터에서 AI 추천 사이드바를 제공합니다.",
-  "version": "1.3",
+  "version": "1.3.1",
   "permissions": [
     "activeTab",
     "alarms",
