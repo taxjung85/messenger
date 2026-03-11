@@ -55,17 +55,7 @@ function getKSTToday() {
   return getKSTNow().toISOString().substring(0, 10);
 }
 
-// ─── 확장프로그램 리로드 후 탭 새로고침 ───
-chrome.storage.local.get("pendingTabReload", (result) => {
-  if (result.pendingTabReload) {
-    chrome.storage.local.remove("pendingTabReload");
-    chrome.tabs.query({ url: ["https://business.kakao.com/*", "https://center-pf.kakao.com/*"] }, (tabs) => {
-      for (const tab of tabs) chrome.tabs.reload(tab.id);
-    });
-  }
-});
-
-// ─── 알람 등록 ───
+// ─── 알람 등록 + 확장프로그램 리로드 후 탭 새로고침 ───
 chrome.runtime.onInstalled.addListener(() => {
   // 1시간 간격 기본 체크 알람
   chrome.alarms.create("todo-check", { periodInMinutes: 60 });
@@ -73,8 +63,20 @@ chrome.runtime.onInstalled.addListener(() => {
   chrome.alarms.create("recurring-generate", { periodInMinutes: 60 });
   // 반복 todo 마감 알림용 (10분 간격으로 체크, 10AM/4PM에만 발동)
   chrome.alarms.create("recurring-notify", { periodInMinutes: 10 });
-  // 버전 체크는 content-list.js에서 접속 시 1회 수행
   console.log("[AI BG] 알람 등록 완료");
+
+  // 확장프로그램 리로드 후 카카오 탭 새로고침
+  chrome.storage.local.get("pendingTabReload", (result) => {
+    if (result.pendingTabReload) {
+      chrome.storage.local.remove("pendingTabReload");
+      setTimeout(() => {
+        chrome.tabs.query({ url: ["https://business.kakao.com/*", "https://center-pf.kakao.com/*"] }, (tabs) => {
+          for (const tab of tabs) chrome.tabs.reload(tab.id);
+          console.log("[AI BG] 탭", tabs.length + "개 새로고침 완료");
+        });
+      }, 500);
+    }
+  });
 });
 
 // 서비스 워커 재시작 시에도 알람 보장
