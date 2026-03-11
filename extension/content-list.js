@@ -1033,6 +1033,13 @@
         showToast("'" + selectedName + "' (으)로 설정됨", true);
       }
 
+      // 기본 필터: 자기 이름으로 설정
+      const myNameRes = await new Promise(r => chrome.storage.local.get("employeeName", r));
+      if (myNameRes.employeeName) {
+        currentFilter = myNameRes.employeeName;
+        if (filterSelect) filterSelect.value = myNameRes.employeeName;
+      }
+
       // 반복 todo 자동 생성 (매월 초)
       await generateRecurringTodos();
 
@@ -1049,6 +1056,23 @@
 
       // 반복 일정 헤더 집계 표시 (접혀있어도 보이도록 초기 로드)
       renderRecurringList();
+
+      // 버전 체크 (접속 시 1회)
+      try {
+        const { data: verData } = await supabase.from("settings").select("value").eq("key", "app_version").single();
+        if (verData && verData.value !== chrome.runtime.getManifest().version) {
+          const toast = document.createElement("div");
+          toast.innerHTML = '🔄 새 버전 <b>v' + verData.value + '</b> 사용 가능 — <u>클릭하여 새로고침</u>';
+          Object.assign(toast.style, {
+            position: "fixed", bottom: "30px", left: "50%", transform: "translateX(-50%)",
+            padding: "12px 24px", borderRadius: "10px", fontSize: "13px", fontWeight: "600", zIndex: "999999",
+            color: "white", background: "linear-gradient(135deg,#6366f1,#8b5cf6)",
+            boxShadow: "0 4px 16px rgba(99,102,241,0.35)", cursor: "pointer",
+          });
+          toast.addEventListener("click", () => chrome.runtime.sendMessage({ type: "reload-extension" }));
+          document.body.appendChild(toast);
+        }
+      } catch (e) {}
 
       toggleBtn.addEventListener("click", async () => {
         sidebar.classList.toggle("collapsed");
@@ -1116,7 +1140,16 @@
           updateCountdown();
         }
         if (msg.type === "version-update") {
-          showToast("🔄 새 버전 v" + msg.version + " 사용 가능 — 새로고침하세요", true);
+          const toast = document.createElement("div");
+          toast.innerHTML = '🔄 새 버전 <b>v' + msg.version + '</b> 사용 가능 — <u>클릭하여 새로고침</u>';
+          Object.assign(toast.style, {
+            position: "fixed", bottom: "30px", left: "50%", transform: "translateX(-50%)",
+            padding: "12px 24px", borderRadius: "10px", fontSize: "13px", fontWeight: "600", zIndex: "999999",
+            color: "white", background: "linear-gradient(135deg,#6366f1,#8b5cf6)",
+            boxShadow: "0 4px 16px rgba(99,102,241,0.35)", cursor: "pointer",
+          });
+          toast.addEventListener("click", () => chrome.runtime.sendMessage({ type: "reload-extension" }));
+          document.body.appendChild(toast);
         }
       });
     })

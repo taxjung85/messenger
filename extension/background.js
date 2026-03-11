@@ -63,8 +63,7 @@ chrome.runtime.onInstalled.addListener(() => {
   chrome.alarms.create("recurring-generate", { periodInMinutes: 60 });
   // 반복 todo 마감 알림용 (10분 간격으로 체크, 10AM/4PM에만 발동)
   chrome.alarms.create("recurring-notify", { periodInMinutes: 10 });
-  // 버전 체크 (10분 간격)
-  chrome.alarms.create("version-check", { periodInMinutes: 10 });
+  // 버전 체크는 content-list.js에서 접속 시 1회 수행
   console.log("[AI BG] 알람 등록 완료");
 });
 
@@ -78,9 +77,7 @@ chrome.alarms.get("recurring-generate", (a) => {
 chrome.alarms.get("recurring-notify", (a) => {
   if (!a) chrome.alarms.create("recurring-notify", { periodInMinutes: 10 });
 });
-chrome.alarms.get("version-check", (a) => {
-  if (!a) chrome.alarms.create("version-check", { periodInMinutes: 10 });
-});
+// version-check 알람 제거 (content-list.js에서 접속 시 체크)
 
 // ─── 버전 체크 ───
 async function checkVersionUpdate() {
@@ -110,10 +107,17 @@ async function checkVersionUpdate() {
   }
 }
 
-// 알림 클릭 → 확장 프로그램 새로고침
+// 알림 클릭 → 탭 새로고침 후 확장프로그램 리로드
 chrome.notifications.onClicked.addListener((notifId) => {
   if (notifId === "version-update") {
-    chrome.runtime.reload();
+    // 카카오 탭 전부 새로고침
+    chrome.tabs.query({ url: ["https://business.kakao.com/*", "https://center-pf.kakao.com/*"] }, (tabs) => {
+      for (const tab of tabs) {
+        chrome.tabs.reload(tab.id);
+      }
+      // 탭 새로고침 후 확장프로그램 리로드
+      setTimeout(() => chrome.runtime.reload(), 500);
+    });
   }
 });
 
@@ -278,13 +282,20 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
     await checkRecurringNotifications();
   }
 
-  if (alarm.name === "version-check") {
-    await checkVersionUpdate();
-  }
+  // version-check는 content-list.js에서 처리
 });
 
 // ─── content script 메시지 핸들러 ───
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg.type === "reload-extension") {
+    // 카카오 탭 새로고침 후 확장프로그램 리로드
+    chrome.tabs.query({ url: ["https://business.kakao.com/*", "https://center-pf.kakao.com/*"] }, (tabs) => {
+      for (const tab of tabs) chrome.tabs.reload(tab.id);
+      setTimeout(() => chrome.runtime.reload(), 500);
+    });
+    return;
+  }
+
   if (msg.type === "get-next-alarm") {
     chrome.alarms.get("todo-check", (alarm) => {
       sendResponse({ scheduledTime: alarm ? alarm.scheduledTime : null });
