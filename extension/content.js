@@ -469,11 +469,27 @@
     const match = title.match(/(\d{2,})_([^-]+)/);
     if (match) {
       const clientCode = match[1].trim();
-      const clientName = match[2].trim();
+      const clientName = match[2].trim().replace(/\s*\d{2,4}-\d{3,4}-\d{4}\s*/, "").trim();
       console.log("[AI] 거래처코드:", clientCode, "거래처명:", clientName);
       return { clientCode, clientName };
     }
     return { clientCode: "", clientName: title.split(" - ")[0].trim() };
+  }
+
+  // ─── 파일 카테고리 키워드 판별 ───
+  function detectFileCategory(text) {
+    const t = text.replace(/\s/g, "");
+    // 부가가치세
+    if (/부가세|부가가치|매입|매출|세금계산서|계산서합계|전자세금|영세율|면세|과세표준|부가tax|매입매출/.test(t)) return "부가";
+    // 원천
+    if (/원천|급여|인건비|4대보험|일용직|사업소득|근로소득|주민번호|고용보험|산재|월급|갑근세|원천징수|연말정산|퇴직금|퇴직소득/.test(t)) return "원천";
+    // 법인세
+    if (/법인세|법인결산|법인조정|세무조정|소득금액조정|법인신고/.test(t)) return "법인세";
+    // 종합소득세
+    if (/종소세|종합소득|종합소득세|소득세신고/.test(t)) return "종소세";
+    // 결산
+    if (/결산|재무제표|재무상태|손익계산|대차대조|잔액증명|시산표|합계잔액/.test(t)) return "결산";
+    return "기타";
   }
 
   // ─── 감지된 메시지 기록 (순서대로) ───
@@ -1620,23 +1636,31 @@ JSON: {"is_salary":bool}`;
       e.preventDefault();
       e.stopPropagation();
 
-      originalFilename = anchor.getAttribute("download") || href.split("/").pop().split("?")[0] || "file";
+      // 파일명 추출: download 속성 → 주변 텍스트에서 파일명 → URL → fallback
+      originalFilename = anchor.getAttribute("download") || "";
+      if (!originalFilename || originalFilename === "true" || !/\.\w{2,5}$/.test(originalFilename)) {
+        // 주변 영역에서 실제 파일명 찾기 (확장자 포함된 텍스트)
+        const fileArea = anchor.closest('[class*="file"], [class*="attach"], [class*="download"], .bundle_file') || anchor.parentElement;
+        const areaText = fileArea ? fileArea.textContent : "";
+        const fnMatch = areaText.match(/([^\s/\\<>"]+\.(xlsx?|pdf|docx?|hwp|csv|zip|pptx?|jpg|jpeg|png|gif|txt|hwpx?))/i);
+        if (fnMatch) {
+          originalFilename = fnMatch[1].trim();
+        } else {
+          originalFilename = originalFilename || href.split("/").pop().split("?")[0] || "file";
+        }
+      }
 
-      // 확장자 추출: 원본 파일명 → URL → 주변 텍스트에서 파일명 힌트
+      // 확장자 추출
       let ext = "";
-      if (originalFilename.includes(".")) {
-        ext = "." + originalFilename.split(".").pop();
+      const extMatch = originalFilename.match(/\.(\w{2,5})$/);
+      if (extMatch) {
+        ext = "." + extMatch[1].toLowerCase();
       } else {
-        // URL에서 확장자 추출 시도
         const urlExtMatch = href.match(/\.(\w{2,5})(?:\?|$)/);
         if (urlExtMatch) {
           ext = "." + urlExtMatch[1];
         } else {
-          // 근처 텍스트에서 파일명 힌트 (.xlsx, .pdf 등)
-          const nearby = (anchor.closest('[class*="file"], [class*="attach"]') || anchor.parentElement)?.textContent || "";
-          const hintMatch = nearby.match(/\.(xlsx?|pdf|docx?|hwp|csv|zip|jpg|jpeg|png|gif|pptx?)/i);
-          if (hintMatch) ext = "." + hintMatch[1].toLowerCase();
-          else ext = ".image"; // 이미지 fallback (카카오 이미지는 확장자 없음)
+          ext = ".image";
         }
       }
       console.log("[AI] 다운로드 가로채기:", originalFilename, "확장자:", ext);
@@ -1667,34 +1691,16 @@ JSON: {"is_salary":bool}`;
       }
 
       const { clientCode, clientName } = parseClientInfo();
-      const prefix = (clientCode || "unknown") + "_" + (clientName || "unknown").replace(/[\\/:"*?<>|]/g, "_") + "_";
+      const safeClientName = (clientName || "unknown").replace(/[\\/:"*?<>|]/g, "_");
+      const safeOrigName = originalFilename.replace(/\.\w+$/, "").replace(/[\\/:"*?<>|]/g, "_");
 
-      // AI에게 파일명 추천 요청
-      let aiName = originalFilename;
-      try {
-        const prompt = `파일의 카테고리를 판단하여 파일명을 정해줘.
-카테고리는 반드시 다음 중 하나: 결산, 부가가치세, 원천, 기타
-- 결산: 재무제표, 결산, 세무조정 관련
-- 부가가치세: 부가세, 매출/매입, 세금계산서 관련
-- 원천: 인건비, 급여, 4대보험, 원천세, 일용직 관련
-- 기타: 위에 해당 안 되는 경우
-파일명 형식: "카테고리_세부설명" (세부설명은 간결하게)
-원본파일명: ${originalFilename}
-주변대화:
-${contextMsgs.join("\n")}
-JSON: {"filename":"카테고리_세부설명"}`;
-        const r = await fetchAI(prompt, "파일명 API", 200, "gpt-4.1-nano");
-        if (r && r.filename) {
-          aiName = r.filename.replace(/[\\/:"*?<>|]/g, "_").replace(/\.\w+$/, "");
-        }
-      } catch (err) {
-        console.warn("[AI] 파일명 AI 실패, 원본 사용:", err.message);
-        aiName = originalFilename.replace(/\.\w+$/, "");
-      }
+      // 키워드 기반 카테고리 판별
+      const allText = (originalFilename + " " + contextMsgs.join(" ")).toLowerCase();
+      const category = detectFileCategory(allText);
 
       const kstNow = new Date(Date.now() + 9 * 60 * 60 * 1000);
-      const dateTag = kstNow.toISOString().substring(0, 10).replace(/-/g, "");
-      const finalName = prefix + aiName + "_" + dateTag + ext;
+      const dateTag = kstNow.toISOString().substring(2, 10).replace(/-/g, "");
+      const finalName = (clientCode || "unknown") + "_" + safeClientName + "_" + safeOrigName + "_" + category + "_" + dateTag + ext;
       console.log("[AI] 최종 파일명:", finalName);
 
       // background에 다운로드 요청
@@ -1703,6 +1709,7 @@ JSON: {"filename":"카테고리_세부설명"}`;
         type: "ai-download",
         url: downloadUrl,
         filename: finalName,
+        clientCode: clientCode,
       }, (resp) => {
         if (resp && resp.error) {
           console.error("[AI] 다운로드 실패:", resp.error);
@@ -1717,13 +1724,13 @@ JSON: {"filename":"카테고리_세부설명"}`;
       });
     }, true); // capture phase로 등록하여 기본 핸들러보다 먼저 실행
     console.log("[AI] 다운로드 가로채기 활성화");
-    showToast("파일 다운로드 자동 이름변경 활성화", true);
+    // toast 제거 — 콘솔 로그만
   }
 
   // ─── 자료 일괄 다운로드 ───
   async function bulkDownloadFiles() {
     const { clientCode, clientName } = parseClientInfo();
-    const prefix = (clientCode || "unknown") + "_" + (clientName || "unknown").replace(/[\\/:"*?<>|]/g, "_") + "_";
+    const safeClientName = (clientName || "unknown").replace(/[\\/:"*?<>|]/g, "_");
     const minDate = getMinBusinessDate(); // 2영업일 이내
 
     // 이미 다운로드한 URL 기록 (중복 방지)
@@ -1797,21 +1804,27 @@ JSON: {"filename":"카테고리_세부설명"}`;
     for (let idx = 0; idx < filtered.length; idx++) {
       const a = filtered[idx];
       const href = a.getAttribute("href") || "";
-      const originalFilename = a.getAttribute("download") || href.split("/").pop().split("?")[0] || "file";
+      // 파일명 추출: download 속성 → 주변 텍스트 → URL → fallback
+      let originalFilename = a.getAttribute("download") || "";
+      if (!originalFilename || originalFilename === "true" || !/\.\w{2,5}$/.test(originalFilename)) {
+        const fileArea = a.closest('[class*="file"], [class*="attach"], [class*="download"], .bundle_file') || a.parentElement;
+        const areaText = fileArea ? fileArea.textContent : "";
+        const fnMatch = areaText.match(/([^\s/\\<>"]+\.(xlsx?|pdf|docx?|hwp|csv|zip|pptx?|jpg|jpeg|png|gif|txt|hwpx?))/i);
+        if (fnMatch) {
+          originalFilename = fnMatch[1].trim();
+        } else {
+          originalFilename = originalFilename || href.split("/").pop().split("?")[0] || "file";
+        }
+      }
 
-      // 확장자 추출
       let ext = "";
-      if (originalFilename.includes(".")) {
-        ext = "." + originalFilename.split(".").pop();
+      const extMatch = originalFilename.match(/\.(\w{2,5})$/);
+      if (extMatch) {
+        ext = "." + extMatch[1].toLowerCase();
       } else {
         const urlExtMatch = href.match(/\.(\w{2,5})(?:\?|$)/);
         if (urlExtMatch) ext = "." + urlExtMatch[1];
-        else {
-          const nearby = (a.closest('[class*="file"], [class*="attach"]') || a.parentElement)?.textContent || "";
-          const hintMatch = nearby.match(/\.(xlsx?|pdf|docx?|hwp|csv|zip|jpg|jpeg|png|gif|pptx?)/i);
-          if (hintMatch) ext = "." + hintMatch[1].toLowerCase();
-          else ext = ".file";
-        }
+        else ext = ".file";
       }
 
       // 주변 대화 수집 (전후 5개)
@@ -1836,31 +1849,13 @@ JSON: {"filename":"카테고리_세부설명"}`;
         }
       }
 
-      // AI 파일명 추천
-      let aiName = originalFilename;
-      try {
-        const prompt = `파일의 카테고리를 판단하여 파일명을 정해줘.
-카테고리는 반드시 다음 중 하나: 결산, 부가가치세, 원천, 기타
-- 결산: 재무제표, 결산, 세무조정 관련
-- 부가가치세: 부가세, 매출/매입, 세금계산서 관련
-- 원천: 인건비, 급여, 4대보험, 원천세, 일용직 관련
-- 기타: 위에 해당 안 되는 경우
-파일명 형식: "카테고리_세부설명" (세부설명은 간결하게)
-원본파일명: ${originalFilename}
-주변대화:
-${contextMsgs.join("\n")}
-JSON: {"filename":"카테고리_세부설명"}`;
-        const r = await fetchAI(prompt, "파일명 API", 200, "gpt-4.1-nano");
-        if (r && r.filename) {
-          aiName = r.filename.replace(/[\\/:"*?<>|]/g, "_").replace(/\.\w+$/, "");
-        }
-      } catch (err) {
-        aiName = originalFilename.replace(/\.\w+$/, "") || "file";
-      }
+      const safeOrigName = originalFilename.replace(/\.\w+$/, "").replace(/[\\/:"*?<>|]/g, "_") || "file";
+      const allText = (originalFilename + " " + contextMsgs.join(" ")).toLowerCase();
+      const category = detectFileCategory(allText);
 
       const kstNow = new Date(Date.now() + 9 * 60 * 60 * 1000);
-      const dateTag = kstNow.toISOString().substring(0, 10).replace(/-/g, "");
-      const finalName = prefix + aiName + "_" + dateTag + ext;
+      const dateTag = kstNow.toISOString().substring(2, 10).replace(/-/g, "");
+      const finalName = (clientCode || "unknown") + "_" + safeClientName + "_" + safeOrigName + "_" + category + "_" + dateTag + ext;
 
       // 다운로드 요청
       const downloadUrl = href.startsWith("http") ? href : new URL(href, location.origin).href;
@@ -1869,6 +1864,7 @@ JSON: {"filename":"카테고리_세부설명"}`;
           type: "ai-download",
           url: downloadUrl,
           filename: finalName,
+          clientCode: clientCode,
         }, (resp) => {
           if (resp && resp.error) {
             console.error("[AI] 일괄 다운로드 실패:", finalName, resp.error);
@@ -1880,9 +1876,9 @@ JSON: {"filename":"카테고리_세부설명"}`;
         });
       });
 
-      // 연속 다운로드 차단 방지: 1.5초 대기
+      // 연속 다운로드 차단 방지
       if (idx < filtered.length - 1) {
-        await new Promise(r => setTimeout(r, 1500));
+        await new Promise(r => setTimeout(r, 500));
       }
     }
 
@@ -1934,6 +1930,40 @@ JSON: {"filename":"카테고리_세부설명"}`;
     });
     toolbar.appendChild(btn);
     console.log("[AI] 일괄 다운로드 버튼 삽입 완료");
+
+    // ─── 거래처 폴더 열기 버튼 ───
+    if (!document.getElementById("ai-open-folder-btn")) {
+      const folderBtn = document.createElement("button");
+      folderBtn.id = "ai-open-folder-btn";
+      folderBtn.textContent = "\uD83D\uDCC2";
+      folderBtn.title = "거래처 폴더 열기";
+      Object.assign(folderBtn.style, {
+        width: "32px", height: "32px",
+        border: "1px solid #d1d5db", borderRadius: "6px",
+        background: "linear-gradient(135deg, #f59e0b, #d97706)",
+        color: "white", fontSize: "16px",
+        cursor: "pointer", display: "inline-flex",
+        alignItems: "center", justifyContent: "center",
+        marginLeft: "6px", verticalAlign: "middle",
+        transition: "all 0.2s",
+      });
+      folderBtn.addEventListener("mouseenter", () => { folderBtn.style.transform = "scale(1.1)"; });
+      folderBtn.addEventListener("mouseleave", () => { folderBtn.style.transform = "scale(1)"; });
+      folderBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const { clientCode } = parseClientInfo();
+        if (!clientCode) {
+          showToast("거래처 코드를 찾을 수 없습니다.", false);
+          return;
+        }
+        chrome.runtime.sendMessage({ type: "open-client-folder", clientCode }, (res) => {
+          if (res && !res.success) showToast(res.error || "폴더 열기 실패", false);
+        });
+      });
+      toolbar.appendChild(folderBtn);
+      console.log("[AI] 거래처 폴더 열기 버튼 삽입 완료");
+    }
   }
 
   // ─── MutationObserver ───
@@ -2156,4 +2186,5 @@ JSON: {"filename":"카테고리_세부설명"}`;
       startObserver();
     })
     .catch((err) => console.error("[AI] 로드 실패:", err));
+
 })();

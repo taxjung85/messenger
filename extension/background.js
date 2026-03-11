@@ -309,9 +309,34 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true; // async sendResponse
   }
 
-  // 파일 다운로드 (AI 파일명 적용)
+  // 거래처 폴더 열기 (네이티브 메시징)
+  if (msg.type === "open-client-folder") {
+    chrome.storage.local.get("clientFolderPath", (result) => {
+      const basePath = result.clientFolderPath;
+      if (!basePath) {
+        sendResponse({ success: false, error: "옵션에서 거래처 폴더 경로를 설정해주세요." });
+        return;
+      }
+      chrome.runtime.sendNativeMessage("com.jungsem.messenger", {
+        action: "open_folder",
+        basePath: basePath,
+        clientCode: msg.clientCode,
+      }, (res) => {
+        if (chrome.runtime.lastError) {
+          console.error("[AI BG] 네이티브 호스트 오류:", chrome.runtime.lastError.message);
+          sendResponse({ success: false, error: "install_host.bat을 관리자로 실행해주세요." });
+        } else {
+          sendResponse(res);
+        }
+      });
+    });
+    return true;
+  }
+
+  // 파일 다운로드 (AI 파일명 적용 + 거래처 폴더로 이동)
   if (msg.type === "ai-download") {
     let filename = msg.filename;
+    const clientCode = msg.clientCode || "";
     // .image 확장자인 경우 HEAD 요청으로 실제 타입 확인
     if (filename.endsWith(".image")) {
       fetch(msg.url, { method: "HEAD" }).then(res => {
@@ -338,10 +363,46 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           sendResponse({ error: chrome.runtime.lastError.message });
         } else {
           console.log("[AI BG] 다운로드 시작:", fn, "id:", downloadId);
+          if (clientCode && downloadId) {
+            pendingMoves[downloadId] = { clientCode, filename: fn };
+          }
           sendResponse({ downloadId });
         }
       });
     }
-    return true; // async sendResponse
+    return true;
+  }
+});
+
+// ─── 다운로드 완료 시 거래처 폴더로 이동 ───
+const pendingMoves = {};
+chrome.downloads.onChanged.addListener((delta) => {
+  if (delta.state && delta.state.current === "complete" && pendingMoves[delta.id]) {
+    const { clientCode, filename } = pendingMoves[delta.id];
+    delete pendingMoves[delta.id];
+    chrome.storage.local.get("clientFolderPath", (result) => {
+      const basePath = result.clientFolderPath;
+      if (!basePath) return;
+      chrome.downloads.search({ id: delta.id }, (items) => {
+        if (!items || !items[0] || !items[0].filename) return;
+        const srcPath = items[0].filename;
+        console.log("[AI BG] 파일 이동 요청:", srcPath);
+        chrome.runtime.sendNativeMessage("com.jungsem.messenger", {
+          action: "move_file",
+          src: srcPath,
+          basePath: basePath,
+          clientCode: clientCode,
+          filename: filename,
+        }, (res) => {
+          if (chrome.runtime.lastError) {
+            console.error("[AI BG] 파일 이동 실패:", chrome.runtime.lastError.message);
+          } else if (res && res.success) {
+            console.log("[AI BG] 파일 이동 완료:", res.path);
+          } else {
+            console.error("[AI BG] 파일 이동 실패:", res ? res.error : "unknown");
+          }
+        });
+      });
+    });
   }
 });
