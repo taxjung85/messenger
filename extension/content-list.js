@@ -14,18 +14,18 @@
   const FIXED_HOLIDAYS = [
     "01-01", "03-01", "05-05", "06-06", "08-15", "10-03", "10-09", "12-25",
   ];
-  function isWeekend(d) { const day = d.getDay(); return day === 0 || day === 6; }
+  function isWeekend(d) { const day = d.getUTCDay(); return day === 0 || day === 6; }
   function isHoliday(d) {
-    const mm = String(d.getMonth() + 1).padStart(2, "0");
-    const dd = String(d.getDate()).padStart(2, "0");
+    const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+    const dd = String(d.getUTCDate()).padStart(2, "0");
     return FIXED_HOLIDAYS.includes(mm + "-" + dd);
   }
   function isBusinessDay(d) { return !isWeekend(d) && !isHoliday(d); }
   function prevBusinessDay(dateStr) {
-    // dateStr: "YYYY-MM-DD" → 해당일이 휴일이면 전 영업일 반환
-    const d = new Date(dateStr + "T00:00:00+09:00");
+    // dateStr: "YYYY-MM-DD" → 해당일이 휴일이면 전 영업일 반환 (UTC로 계산)
+    const d = new Date(dateStr + "T00:00:00Z");
     while (!isBusinessDay(d)) {
-      d.setDate(d.getDate() - 1);
+      d.setUTCDate(d.getUTCDate() - 1);
     }
     return d.toISOString().substring(0, 10);
   }
