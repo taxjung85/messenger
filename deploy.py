@@ -4,7 +4,7 @@ import json, os, subprocess, sys, urllib.request
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
 # ─── 버전 입력 ───
-version = input("새 버전 입력 (예: 1.2.0): ").strip()
+version = input("새 버전 입력 (예: 1.2.0): ").strip().lstrip("vV")
 if not version:
     print("버전을 입력하세요.")
     sys.exit(1)
