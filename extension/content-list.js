@@ -223,7 +223,7 @@
       ...((todoRes.data || []).map(d => d.assigned_to)),
       ...((recurRes.data || []).map(d => d.assigned_to)),
     ].filter(Boolean);
-    knownEmployees = [...new Set(names)];
+    knownEmployees = [...new Set(names)].filter(n => n !== "전체");
     // chrome.storage에 저장된 이름들 추가 (내 이름 + 직원 목록)
     try {
       const res = await new Promise((r) => chrome.storage.local.get(["employeeName", "employeeList"], r));
@@ -594,7 +594,7 @@
         opt.textContent = name;
         filterSelect.appendChild(opt);
       });
-      filterSelect.value = prevValue || "all";
+      filterSelect.value = (prevValue && prevValue !== "all") ? prevValue : (currentFilter !== "all" ? currentFilter : "all");
     }
 
     sorted.forEach((todo) => {

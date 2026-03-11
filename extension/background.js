@@ -55,6 +55,16 @@ function getKSTToday() {
   return getKSTNow().toISOString().substring(0, 10);
 }
 
+// ─── 확장프로그램 리로드 후 탭 새로고침 ───
+chrome.storage.local.get("pendingTabReload", (result) => {
+  if (result.pendingTabReload) {
+    chrome.storage.local.remove("pendingTabReload");
+    chrome.tabs.query({ url: ["https://business.kakao.com/*", "https://center-pf.kakao.com/*"] }, (tabs) => {
+      for (const tab of tabs) chrome.tabs.reload(tab.id);
+    });
+  }
+});
+
 // ─── 알람 등록 ───
 chrome.runtime.onInstalled.addListener(() => {
   // 1시간 간격 기본 체크 알람
@@ -107,16 +117,11 @@ async function checkVersionUpdate() {
   }
 }
 
-// 알림 클릭 → 탭 새로고침 후 확장프로그램 리로드
+// 알림 클릭 → 확장프로그램 리로드 후 탭 새로고침
 chrome.notifications.onClicked.addListener((notifId) => {
   if (notifId === "version-update") {
-    // 카카오 탭 전부 새로고침
-    chrome.tabs.query({ url: ["https://business.kakao.com/*", "https://center-pf.kakao.com/*"] }, (tabs) => {
-      for (const tab of tabs) {
-        chrome.tabs.reload(tab.id);
-      }
-      // 탭 새로고침 후 확장프로그램 리로드
-      setTimeout(() => chrome.runtime.reload(), 500);
+    chrome.storage.local.set({ pendingTabReload: true }, () => {
+      chrome.runtime.reload();
     });
   }
 });
@@ -288,10 +293,9 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 // ─── content script 메시지 핸들러 ───
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === "reload-extension") {
-    // 카카오 탭 새로고침 후 확장프로그램 리로드
-    chrome.tabs.query({ url: ["https://business.kakao.com/*", "https://center-pf.kakao.com/*"] }, (tabs) => {
-      for (const tab of tabs) chrome.tabs.reload(tab.id);
-      setTimeout(() => chrome.runtime.reload(), 500);
+    // 플래그 저장 후 확장프로그램 리로드 → 재시작 시 탭 새로고침
+    chrome.storage.local.set({ pendingTabReload: true }, () => {
+      chrome.runtime.reload();
     });
     return;
   }
