@@ -34,14 +34,6 @@
     const kst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
     return kst.toISOString().substring(0, 10);
   }
-  function formatShortDate(dateStr) {
-    if (!dateStr) return "";
-    const d = dateStr.substring(0, 10); // "YYYY-MM-DD" 부분만
-    const parts = d.split("-");
-    if (parts.length !== 3) return d;
-    return parts[1] + "." + parts[2]; // "MM.DD"
-  }
-
   // ─── 커스텀 입력 팝업 ───
   function showInputPopup(title, defaultValue, placeholder) {
     return new Promise((resolve) => {
@@ -83,6 +75,62 @@
       overlay.addEventListener("click", (ev) => { if (ev.target === overlay) close(null); });
       input.addEventListener("keydown", (ev) => {
         if (ev.key === "Enter") close(input.value.trim() || null);
+        if (ev.key === "Escape") close(null);
+      });
+    });
+  }
+
+  // ─── DD 전용 날짜 입력 팝업 (올해/이번달 기준, DD만 입력) ───
+  function showDayPopup(title, currentDay) {
+    return new Promise((resolve) => {
+      const overlay = document.createElement("div");
+      overlay.className = "ai-popup-overlay";
+      const box = document.createElement("div");
+      box.className = "ai-popup-box";
+      const now = new Date();
+      const kst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+      const yyyy = kst.getFullYear();
+      const mm = String(kst.getMonth() + 1).padStart(2, "0");
+      box.innerHTML = `
+        <div class="ai-popup-title">${title}</div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px;">
+          <span style="font-size:14px;font-weight:700;color:var(--ai-primary);">${yyyy}년 ${mm}월</span>
+          <input type="number" id="ai-day-popup-field" min="1" max="31" value="${currentDay || ""}"
+            placeholder="DD" style="width:60px;text-align:center;padding:8px;border:1.5px solid #d1d5db;border-radius:10px;font-size:16px;font-weight:700;outline:none;transition:border 0.2s;background:#f8fafc;" />
+          <span style="font-size:14px;font-weight:600;color:var(--ai-text-muted);">일</span>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <button id="ai-day-popup-ok" class="ai-btn ai-btn-gradient" style="flex:1;">확인</button>
+          <button id="ai-day-popup-cancel" class="ai-btn ai-btn-secondary" style="flex:1;">취소</button>
+          <button id="ai-day-popup-clear" class="ai-btn" style="flex:0.6;background:#fee2e2;color:#dc2626;font-size:12px;">삭제</button>
+        </div>
+      `;
+      overlay.appendChild(box);
+      document.body.appendChild(overlay);
+      const input = box.querySelector("#ai-day-popup-field");
+      input.focus(); input.select();
+      input.addEventListener("focus", () => { input.style.borderColor = "#6366f1"; });
+      input.addEventListener("blur", () => { input.style.borderColor = "#d1d5db"; });
+      // 2자리 강제
+      input.addEventListener("input", () => {
+        let v = input.value.replace(/\D/g, "");
+        if (v.length > 2) v = v.substring(0, 2);
+        const n = parseInt(v);
+        if (n > 31) v = "31";
+        if (n < 0) v = "";
+        input.value = v;
+      });
+      const close = (val) => { overlay.remove(); resolve(val); };
+      box.querySelector("#ai-day-popup-ok").onclick = () => {
+        const v = parseInt(input.value);
+        if (!v || v < 1 || v > 31) { input.style.borderColor = "#ef4444"; return; }
+        close(v);
+      };
+      box.querySelector("#ai-day-popup-cancel").onclick = () => close(null);
+      box.querySelector("#ai-day-popup-clear").onclick = () => close(-1); // -1 = 삭제
+      overlay.addEventListener("click", (ev) => { if (ev.target === overlay) close(null); });
+      input.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter") box.querySelector("#ai-day-popup-ok").click();
         if (ev.key === "Escape") close(null);
       });
     });
@@ -387,25 +435,19 @@
         '<option value="전체"' + (r.assigned_to === "전체" ? ' selected' : '') + '>전체</option>' +
         knownEmployees.map(n => '<option value="' + n.replace(/"/g, '&quot;') + '"' + (r.assigned_to === n ? ' selected' : '') + '>' + n.replace(/</g, '&lt;') + '</option>').join('');
 
-      // 2줄 레이아웃: 1줄=체크+제목+삭제, 2줄=배지+날짜+담당자
-      item.innerHTML = `
-        <div class="ai-todo-row">
-          <div class="ai-drag-handle" title="드래그하여 일반 할일로 변환">⠿</div>
-          <input type="checkbox" ${isDone ? "checked" : ""} class="ai-recurring-check ai-checkbox"
-            ${!todoStatusMap[r.id] ? "disabled title='이번 달 미생성'" : ""} />
-          <div style="flex:1;min-width:0;">
-            <div class="ai-recurring-title ai-content-editable" style="${isDone ? "text-decoration:line-through;color:#9ca3af;" : ""}">${(r.title || "").replace(/</g, "&lt;")}</div>
-            <div class="ai-todo-meta-row">
-              <span class="ai-recurring-badge ${isToday ? "ai-recurring-fire" : ""}" title="${dayLabel} (휴일→전영업일)">
-                ${isToday ? "🔥" : "매월"}
-              </span>
-              <span class="ai-recurring-day" style="font-size:11px;font-weight:700;color:#6366f1;cursor:pointer;padding:1px 6px;border:1px solid #e0e7ff;border-radius:6px;background:#eef2ff;" title="클릭하여 날짜 변경">${dayLabel}</span>
-              <select class="ai-recurring-assignee" style="border:1px solid #d1d5db;border-radius:4px;font-size:11px;color:#4f46e5;font-weight:600;padding:1px 4px;background:#fff;cursor:pointer;">${assigneeOptions}</select>
-            </div>
-          </div>
-          <button class="ai-recurring-del ai-delete-btn" title="삭제">✕</button>
-        </div>
-      `;
+      // 2줄 레이아웃: 1줄=체크+제목+삭제, 2줄=거래처+일자+담당자
+      item.innerHTML =
+        '<div class="ai-todo-row">' +
+          '<input type="checkbox" ' + (isDone ? "checked" : "") + ' class="ai-recurring-check ai-checkbox"' +
+            (!todoStatusMap[r.id] ? ' disabled title="이번 달 미생성"' : '') + ' />' +
+          '<span class="ai-recurring-title ai-content-editable" style="' + (isDone ? "text-decoration:line-through;color:#9ca3af;" : "") + '">' + (r.title || "").replace(/</g, "&lt;") + '</span>' +
+          '<button class="ai-recurring-del ai-delete-btn" title="삭제">✕</button>' +
+        '</div>' +
+        '<div class="ai-todo-meta-row">' +
+          '<span class="ai-client-tag ai-recurring-client' + (r.client_name ? '' : ' ai-client-tag-empty') + '" title="거래처: ' + (r.client_name || "미지정").replace(/"/g, '&quot;') + '">' + (r.client_name ? r.client_name.replace(/</g, "&lt;").substring(0, 8) : '거래처') + '</span>' +
+          '<span class="ai-day-chip' + (isToday ? ' ai-day-chip-fire' : '') + '" title="클릭하여 날짜 변경">' + dayLabel + '</span>' +
+          '<select class="ai-recurring-assignee ai-assignee-chip">' + assigneeOptions + '</select>' +
+        '</div>';
 
       // 체크박스 → 이번 달 해당 todo 상태 변경
       item.querySelector(".ai-recurring-check").addEventListener("change", async (e) => {
@@ -435,77 +477,48 @@
         renderTodos(await loadTodos());
       });
 
-      // 싱글클릭 → 날짜 변경 (인라인 셀렉트)
-      item.querySelector(".ai-recurring-day").addEventListener("click", async (e) => {
+      // 거래처 클릭 → 팝업 변경
+      item.querySelector(".ai-recurring-client").addEventListener("click", async (e) => {
         e.stopPropagation();
-        const dayEl = item.querySelector(".ai-recurring-day");
-        if (dayEl.tagName === "SELECT") return; // 이미 셀렉트 상태
-        const select = document.createElement("select");
-        Object.assign(select.style, {
-          fontSize: "11px", fontWeight: "700", color: "#6366f1",
-          border: "1.5px solid #6366f1", borderRadius: "6px", outline: "none",
-          background: "#fff", padding: "2px 4px", cursor: "pointer",
-        });
-        for (let i = 1; i <= 31; i++) {
-          const opt = document.createElement("option");
-          opt.value = i;
-          opt.textContent = i === 31 ? "말일" : i + "일";
-          if (i === r.day_of_month) opt.selected = true;
-          select.appendChild(opt);
-        }
-        dayEl.replaceWith(select);
-        select.focus();
-        const save = async () => {
-          const newDay = parseInt(select.value);
-          if (newDay !== r.day_of_month) {
-            await supabase.from("recurring_todos").update({ day_of_month: newDay }).eq("id", r.id);
-            const today = getKSTToday();
-            const ym = today.substring(0, 7);
-            const ld = new Date(parseInt(ym.substring(0, 4)), parseInt(ym.substring(5, 7)), 0).getDate();
-            const td = Math.min(newDay, ld);
-            const tDate = ym + "-" + String(td).padStart(2, "0");
-            const aDate = prevBusinessDay(tDate);
-            await supabase.from("todos").update({ recurring_date: aDate })
-              .eq("recurring_id", r.id)
-              .gte("created_at", ym + "-01T00:00:00+09:00");
-            showToast((newDay === 31 ? "말일" : newDay + "일") + "로 변경됨", true);
-          }
+        const newName = await showInputPopup("거래처명 변경", r.client_name || "", "거래처명");
+        if (newName !== null) {
+          await supabase.from("recurring_todos").update({ client_name: newName }).eq("id", r.id);
           renderRecurringList();
-        };
-        select.addEventListener("change", save);
-        select.addEventListener("blur", () => { renderRecurringList(); });
+        }
       });
 
-      // 더블클릭 → 제목 인라인 편집
+      // 일자 클릭 → DD 팝업
+      item.querySelector(".ai-day-chip").addEventListener("click", async (e) => {
+        e.stopPropagation();
+        const result = await showDayPopup("반복 일자 변경", r.day_of_month);
+        if (result === null || result === -1) return;
+        if (result !== r.day_of_month) {
+          await supabase.from("recurring_todos").update({ day_of_month: result }).eq("id", r.id);
+          const todayStr = getKSTToday();
+          const ym = todayStr.substring(0, 7);
+          const ld = new Date(parseInt(ym.substring(0, 4)), parseInt(ym.substring(5, 7)), 0).getDate();
+          const td = Math.min(result, ld);
+          const tDate = ym + "-" + String(td).padStart(2, "0");
+          const aDate = prevBusinessDay(tDate);
+          await supabase.from("todos").update({ recurring_date: aDate })
+            .eq("recurring_id", r.id)
+            .gte("created_at", ym + "-01T00:00:00+09:00");
+          showToast((result === 31 ? "말일" : result + "일") + "로 변경됨", true);
+        }
+        renderRecurringList();
+      });
+
+      // 더블클릭 → 제목 팝업 편집
       item.querySelector(".ai-recurring-title").addEventListener("dblclick", async (e) => {
         e.stopPropagation();
-        const titleEl = item.querySelector(".ai-recurring-title");
-        const oldTitle = r.title || "";
-        const input = document.createElement("input");
-        input.type = "text";
-        input.value = oldTitle;
-        Object.assign(input.style, {
-          fontSize: "13px", padding: "3px 6px", width: "100%", boxSizing: "border-box",
-          border: "1.5px solid #6366f1", borderRadius: "6px", outline: "none",
-          background: "#fff",
-        });
-        titleEl.replaceWith(input);
-        input.focus(); input.select();
-        const save = async () => {
-          const newTitle = input.value.trim();
-          if (newTitle && newTitle !== oldTitle) {
-            await supabase.from("recurring_todos").update({ title: newTitle }).eq("id", r.id);
-            await supabase.from("todos").update({ content: newTitle }).eq("recurring_id", r.id);
-            showToast("수정됨", true);
-          }
+        const newTitle = await showInputPopup("제목 수정", r.title || "", "반복 일정 제목");
+        if (newTitle !== null && newTitle !== r.title) {
+          await supabase.from("recurring_todos").update({ title: newTitle }).eq("id", r.id);
+          await supabase.from("todos").update({ content: newTitle }).eq("recurring_id", r.id);
+          showToast("수정됨", true);
           renderRecurringList();
           renderTodos(await loadTodos());
-        };
-        input.addEventListener("blur", save);
-        input.addEventListener("keydown", (ev) => {
-          if (ev.key === "Enter") input.blur();
-          if (ev.key === "Escape") { input.value = oldTitle; input.blur(); }
-        });
+        }
       });
 
       // 드래그 → 일반 할일로 변환용
@@ -593,45 +606,26 @@
       const isDone = todo.status === "completed";
       const dueDate = todo.due_date ? todo.due_date.substring(0, 10) : null;
       const isDueToday = dueDate === today;
+      const dueDay = dueDate ? parseInt(dueDate.substring(8, 10)) : null;
+      const dueDayLabel = dueDay ? dueDay + "일" : "기한";
 
-      // 반복 todo 여부 + 오늘 해당 여부
-      const isRecurring = !!todo.recurring_id;
-      const isRecurringToday = isRecurring && todo.recurring_date === today;
-
-      let badgeHtml = "";
-      if (isRecurring) {
-        if (isRecurringToday) {
-          badgeHtml = '<span class="ai-recurring-badge ai-recurring-fire" title="오늘 마감">🔥</span>';
-        } else {
-          badgeHtml = '<span class="ai-recurring-badge" title="매월 반복">매월</span>';
-        }
-      }
+      const assigneeOptions = '<option value=""' + (!todo.assigned_to ? ' selected' : '') + '>미지정</option>' +
+        '<option value="전체"' + (todo.assigned_to === "전체" ? ' selected' : '') + '>전체</option>' +
+        knownEmployees.map((n) => '<option value="' + n.replace(/"/g, "&quot;") + '"' + (todo.assigned_to === n ? ' selected' : '') + '>' + n.replace(/</g, "&lt;") + '</option>').join('');
 
       card.innerHTML =
         '<div class="ai-todo-row">' +
-          '<div class="ai-drag-handle" title="드래그하여 순서 변경 / 반복 일정으로 이동">⠿</div>' +
           '<input type="checkbox" class="ai-checkbox" ' + (isDone ? "checked" : "") + ' />' +
-          '<div style="flex:1;min-width:0;">' +
-            '<div style="display:flex;align-items:center;gap:5px;">' +
-              badgeHtml +
-              '<span class="ai-todo-content ai-content-editable" ' +
-                (isDone ? 'style="text-decoration:line-through;color:#9ca3af;"' : '') + '>' +
-                todo.content.replace(/</g, "&lt;") +
-              '</span>' +
-            '</div>' +
-            '<div class="ai-todo-meta-row">' +
-              '<span class="ai-client-tag' + (todo.client_name ? '' : ' ai-client-tag-empty') + '" title="거래처: ' + (todo.client_name || "미지정").replace(/"/g, '&quot;') + '">' + (todo.client_name ? (todo.client_name).replace(/</g, "&lt;").substring(0, 8) : '거래처') + '</span>' +
-              '<select class="ai-todo-assignee-select" style="border:1px solid #d1d5db;border-radius:4px;font-size:11px;color:#4f46e5;font-weight:600;padding:1px 4px;background:#fff;cursor:pointer;">' +
-                '<option value=""' + (!todo.assigned_to ? ' selected' : '') + '>미지정</option>' +
-                '<option value="전체"' + (todo.assigned_to === "전체" ? ' selected' : '') + '>전체</option>' +
-                knownEmployees.map((n) => '<option value="' + n.replace(/"/g, "&quot;") + '"' + (todo.assigned_to === n ? ' selected' : '') + '>' + n.replace(/</g, "&lt;") + '</option>').join('') +
-              '</select>' +
-              '<span class="ai-due-date-btn" title="기한 설정" style="font-size:10px;padding:1px 5px;border-radius:4px;border:1px solid ' + (dueDate ? (isDueToday ? '#ef4444' : '#d1d5db') : '#d1d5db') + ';color:' + (dueDate ? (isDueToday ? '#ef4444' : '#6366f1') : '#9ca3af') + ';cursor:pointer;font-weight:600;white-space:nowrap;">' + (dueDate ? (isDueToday ? '🔥 ' + formatShortDate(dueDate) : '📅 ' + formatShortDate(dueDate)) : '📅 기한') + '</span>' +
-              '<span style="color:#d1d5db;">·</span>' +
-              '<span>' + new Date(todo.created_at).toLocaleDateString("ko-KR") + '</span>' +
-            '</div>' +
-          '</div>' +
+          '<span class="ai-todo-content ai-content-editable" ' +
+            (isDone ? 'style="text-decoration:line-through;color:#9ca3af;"' : '') + '>' +
+            todo.content.replace(/</g, "&lt;") +
+          '</span>' +
           '<button class="ai-todo-delete ai-delete-btn" title="삭제">✕</button>' +
+        '</div>' +
+        '<div class="ai-todo-meta-row">' +
+          '<span class="ai-client-tag' + (todo.client_name ? '' : ' ai-client-tag-empty') + '" title="거래처: ' + (todo.client_name || "미지정").replace(/"/g, '&quot;') + '">' + (todo.client_name ? todo.client_name.replace(/</g, "&lt;").substring(0, 8) : '거래처') + '</span>' +
+          '<span class="ai-day-chip' + (isDueToday ? ' ai-day-chip-fire' : '') + (dueDay ? '' : ' ai-day-chip-empty') + '" title="기한 설정">' + dueDayLabel + '</span>' +
+          '<select class="ai-todo-assignee-select ai-assignee-chip">' + assigneeOptions + '</select>' +
         '</div>';
 
       // 체크박스
@@ -646,66 +640,44 @@
         renderTodos(await loadTodos());
       });
 
-      // 더블클릭 → 내용 인라인 편집
+      // 더블클릭 → 내용 팝업 편집
       card.querySelector(".ai-todo-content").addEventListener("dblclick", async (e) => {
         e.stopPropagation();
-        const contentEl = card.querySelector(".ai-todo-content");
-        const oldContent = todo.content || "";
-        const input = document.createElement("input");
-        input.type = "text";
-        input.value = oldContent;
-        Object.assign(input.style, {
-          fontSize: "13px", padding: "2px 6px", width: "100%",
-          border: "1.5px solid #6366f1", borderRadius: "6px", outline: "none",
-          background: "#fff",
-        });
-        contentEl.replaceWith(input);
-        input.focus(); input.select();
-        const save = async () => {
-          const newContent = input.value.trim();
-          if (newContent && newContent !== oldContent) {
-            await supabase.from("todos").update({ content: newContent }).eq("id", todo.id);
-            showToast("수정됨", true);
-          }
+        const newContent = await showInputPopup("내용 수정", todo.content || "", "할 일 내용");
+        if (newContent !== null && newContent !== todo.content) {
+          await supabase.from("todos").update({ content: newContent }).eq("id", todo.id);
+          showToast("수정됨", true);
           renderTodos(await loadTodos());
-        };
-        input.addEventListener("blur", save);
-        input.addEventListener("keydown", (ev) => {
-          if (ev.key === "Enter") input.blur();
-          if (ev.key === "Escape") { input.value = oldContent; input.blur(); }
-        });
+        }
       });
 
-      // client_name 클릭 → 변경
-      const clientTag = card.querySelector(".ai-client-tag");
-      if (clientTag) {
-        clientTag.addEventListener("click", async (e) => {
-          e.stopPropagation();
-          const newName = await showInputPopup("거래처명 변경", todo.client_name || "", "거래처명");
-          if (newName !== null) {
-            await supabase.from("todos").update({ client_name: newName }).eq("id", todo.id);
-            renderTodos(await loadTodos());
-          }
-        });
-      }
-
-      // 기한 클릭 → 날짜 입력
-      card.querySelector(".ai-due-date-btn").addEventListener("click", async (e) => {
+      // 거래처 클릭 → 팝업 변경
+      card.querySelector(".ai-client-tag").addEventListener("click", async (e) => {
         e.stopPropagation();
-        const btn = e.currentTarget;
-        const input = document.createElement("input");
-        input.type = "date";
-        input.value = dueDate || "";
-        Object.assign(input.style, { fontSize: "11px", border: "1.5px solid #6366f1", borderRadius: "4px", padding: "1px 4px", outline: "none" });
-        btn.replaceWith(input);
-        input.focus();
-        const save = async () => {
-          const val = input.value || null;
-          await supabase.from("todos").update({ due_date: val }).eq("id", todo.id);
+        const newName = await showInputPopup("거래처명 변경", todo.client_name || "", "거래처명");
+        if (newName !== null) {
+          await supabase.from("todos").update({ client_name: newName }).eq("id", todo.id);
           renderTodos(await loadTodos());
-        };
-        input.addEventListener("change", save);
-        input.addEventListener("blur", save);
+        }
+      });
+
+      // 기한 클릭 → DD 팝업
+      card.querySelector(".ai-day-chip").addEventListener("click", async (e) => {
+        e.stopPropagation();
+        const result = await showDayPopup("기한 설정", dueDay || "");
+        if (result === null) return; // 취소
+        if (result === -1) {
+          // 삭제
+          await supabase.from("todos").update({ due_date: null }).eq("id", todo.id);
+        } else {
+          const now = new Date();
+          const kst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+          const yyyy = kst.getFullYear();
+          const mm = String(kst.getMonth() + 1).padStart(2, "0");
+          const dd = String(result).padStart(2, "0");
+          await supabase.from("todos").update({ due_date: yyyy + "-" + mm + "-" + dd }).eq("id", todo.id);
+        }
+        renderTodos(await loadTodos());
       });
 
       // 담당자 드롭다운 변경
