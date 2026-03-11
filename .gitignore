@@ -1,0 +1,15 @@
+# 전부 무시
+*
+
+# extension 폴더만 허용
+!extension/
+!extension/**
+
+# 배포/설정 파일 허용
+!deploy.py
+!deploy.bat
+!.gitignore
+
+# 민감 정보 제외
+deploy_config.json
+.env*

@@ -1,0 +1,51 @@
+{
+  "manifest_version": 3,
+  "name": "카카오톡 채널 AI 추천 사이드바",
+  "description": "카카오톡 채널 관리자 센터에서 AI 추천 사이드바를 제공합니다.",
+  "version": "1.2",
+  "permissions": [
+    "activeTab",
+    "alarms",
+    "downloads",
+    "notifications",
+    "storage"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://center-pf.kakao.com/*",
+        "https://business.kakao.com/*"
+      ],
+      "js": [
+        "supabase.min.js",
+        "content.js",
+        "content-list.js"
+      ],
+      "css": [
+        "style.css"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "sidebar.html",
+        "sidebar-list.html"
+      ],
+      "matches": [
+        "https://center-pf.kakao.com/*",
+        "https://business.kakao.com/*"
+      ]
+    }
+  ],
+  "options_page": "options.html",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

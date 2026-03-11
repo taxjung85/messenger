@@ -1,0 +1,68 @@
+<!-- To-Do 사이드바 토글 버튼 -->
+<button id="ai-sidebar-toggle" class="ai-sidebar-toggle" title="할 일 목록 열기/닫기">
+  <span class="ai-toggle-text">할일</span>
+</button>
+
+<!-- 사이드바 본체 -->
+<div id="ai-sidebar" class="ai-sidebar">
+  <div class="ai-sidebar-header">
+    <div class="ai-header-brand">
+      <div class="ai-brand-icon">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M9 11l3 3L22 4"/>
+          <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+        </svg>
+      </div>
+      <h2>To-Do 목록</h2>
+      <span id="ai-version-badge" class="ai-version-badge"></span>
+    </div>
+  </div>
+
+  <div class="ai-filter-bar">
+    <label class="ai-filter-label">담당자:</label>
+    <select id="ai-employee-filter" class="ai-select ai-employee-select">
+      <option value="all">전체</option>
+    </select>
+    <button id="ai-employee-setting" class="ai-btn-text" title="내 이름 설정">설정</button>
+  </div>
+
+  <!-- To-Do 직접 입력 -->
+  <div class="ai-input-bar">
+    <div class="ai-input-group">
+      <input id="ai-todo-input" class="ai-input" type="text" placeholder="할 일을 입력하세요" />
+      <button id="ai-todo-add-btn" class="ai-btn ai-btn-gradient ai-btn-sm" title="추가">추가</button>
+    </div>
+  </div>
+
+  <div class="ai-sidebar-body">
+    <div id="ai-status" class="ai-status">
+      할 일 목록을 불러오는 중...
+    </div>
+    
+    <div id="ai-recommendations" class="ai-recommendations ai-list-container"></div>
+
+    <!-- 반복 일정 섹션 -->
+    <div id="ai-recurring-section" class="ai-recurring-section">
+      <div id="ai-recurring-toggle" class="ai-recurring-header">
+        <span class="ai-recurring-title-wrap">
+          <span class="ai-recurring-icon">↻</span>
+          반복 일정
+          <span id="ai-recurring-stats" class="ai-recurring-stats"></span>
+        </span>
+        <span id="ai-recurring-arrow" class="ai-recurring-arrow" style="transform: rotate(180deg);">▼</span>
+      </div>
+      <div id="ai-recurring-list" class="ai-recurring-list"></div>
+    </div>
+  </div>
+
+  <div class="ai-sidebar-footer">
+    <div id="ai-next-push" class="ai-next-push">다음 알림: 계산 중...</div>
+    <button id="ai-refresh-btn" class="ai-btn ai-btn-full ai-btn-gradient">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+        <path d="M3 3v5h5"/>
+      </svg>
+      새로고침
+    </button>
+  </div>
+</div>

@@ -1,0 +1,66 @@
+<!-- AI 추천 사이드바 컨테이너 구조 -->
+<!-- 토글 버튼 -->
+<button id="ai-sidebar-toggle" class="ai-sidebar-toggle" title="AI 사이드바 열기/닫기">
+  <span class="ai-toggle-text">AI</span>
+</button>
+
+<!-- 사이드바 본체 -->
+<div id="ai-sidebar" class="ai-sidebar">
+  <div class="ai-sidebar-header">
+    <div class="ai-header-brand">
+      <div class="ai-brand-icon">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>
+          <path d="M19 3v4"/>
+          <path d="M21 5h-4"/>
+        </svg>
+      </div>
+      <h2>AI 추천 답변</h2>
+    </div>
+  </div>
+
+  <div class="ai-sidebar-body">
+    <div id="ai-status" class="ai-status">
+      고객 메시지를 기다리는 중...
+    </div>
+    <div id="ai-recommendations" class="ai-recommendations ai-list-container"></div>
+  </div>
+
+  <!-- 템플릿 섹션 -->
+  <div class="ai-template-section">
+    <div class="ai-template-header">
+      <span class="ai-template-title">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="color:var(--ai-primary);">
+          <circle cx="12" cy="12" r="8"></circle>
+        </svg>
+        자주 쓰는 답변
+      </span>
+      <button id="ai-template-add-btn" class="ai-icon-btn" title="템플릿 추가">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 5v14M5 12h14"/>
+        </svg>
+      </button>
+    </div>
+    <div id="ai-template-list" class="ai-template-list"></div>
+    
+    <!-- 템플릿 추가 폼 (숨김) -->
+    <div id="ai-template-form" class="ai-template-form" style="display:none;">
+      <input id="ai-template-title" class="ai-input" type="text" placeholder="제목 (예: 서류 안내)" />
+      <textarea id="ai-template-content" class="ai-textarea" placeholder="답변 내용을 입력하세요"></textarea>
+      <div class="ai-form-actions">
+        <button id="ai-template-cancel-btn" class="ai-btn ai-btn-secondary">취소</button>
+        <button id="ai-template-save-btn" class="ai-btn ai-btn-primary">저장</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="ai-sidebar-footer">
+    <button id="ai-refresh-btn" class="ai-btn ai-btn-full ai-btn-gradient">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+        <path d="M3 3v5h5"/>
+      </svg>
+      AI 재분석
+    </button>
+  </div>
+</div>

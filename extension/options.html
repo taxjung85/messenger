@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>AI 상담 어시스턴트 설정</title>
+  <style>
+    @import url("https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css");
+    
+    :root {
+      --ai-primary: #6366f1;
+      --ai-primary-hover: #4f46e5;
+      --ai-primary-light: #e0e7ff;
+      --ai-secondary: #8b5cf6;
+      --ai-bg-main: #f8fafc;
+      --ai-text-main: #0f172a;
+      --ai-text-muted: #64748b;
+      --ai-border: rgba(226, 232, 240, 0.8);
+      --ai-shadow-sm: 0 2px 8px rgba(99, 102, 241, 0.08);
+      --ai-shadow-md: 0 8px 16px rgba(99, 102, 241, 0.12);
+      --ai-radius-sm: 8px;
+      --ai-radius-md: 12px;
+      --ai-transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    
+    body { 
+      font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; 
+      background: var(--ai-bg-main); 
+      min-height: 100vh; 
+      display: flex; 
+      align-items: center; 
+      justify-content: center; 
+      color: var(--ai-text-main);
+    }
+    
+    .ai-options-container { 
+      background: rgba(255, 255, 255, 0.85); 
+      backdrop-filter: blur(12px);
+      border: 1px solid var(--ai-border);
+      border-radius: 16px; 
+      box-shadow: 0 16px 32px rgba(99,102,241,0.08); 
+      padding: 36px; 
+      width: 480px; 
+      max-width: 95vw; 
+    }
+    
+    .ai-header {
+      margin-bottom: 24px;
+      text-align: center;
+    }
+    
+    h1 { 
+      font-size: 22px; 
+      font-weight: 800;
+      background: linear-gradient(135deg, var(--ai-primary), var(--ai-secondary));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 8px; 
+      letter-spacing: -0.5px;
+    }
+    
+    .subtitle { 
+      font-size: 13px; 
+      color: var(--ai-text-muted); 
+    }
+    
+    .ai-field { margin-bottom: 20px; }
+    
+    .ai-field label { 
+      display: block; 
+      font-size: 13px; 
+      font-weight: 600; 
+      margin-bottom: 8px; 
+    }
+    
+    .ai-field label .hint { 
+      font-weight: 400; 
+      color: var(--ai-text-muted); 
+      font-size: 11px; 
+      margin-left: 4px;
+    }
+    
+    .ai-input { 
+      width: 100%; 
+      padding: 12px 14px; 
+      border: 1px solid #d1d5db; 
+      border-radius: var(--ai-radius-sm); 
+      font-size: 14px; 
+      font-family: 'Pretendard', monospace; 
+      transition: var(--ai-transition); 
+      background: #f8fafc;
+    }
+    
+    .ai-input:focus { 
+      outline: none; 
+      border-color: var(--ai-primary); 
+      box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15); 
+      background: #fff;
+    }
+    
+    .ai-actions { 
+      display: flex; 
+      gap: 12px; 
+      margin-top: 32px; 
+    }
+    
+    .ai-btn { 
+      flex: 1; 
+      padding: 12px; 
+      border: none; 
+      border-radius: var(--ai-radius-sm); 
+      font-size: 14px; 
+      font-weight: 600; 
+      font-family: inherit;
+      cursor: pointer; 
+      transition: var(--ai-transition); 
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+    
+    .ai-btn-primary { 
+      background: linear-gradient(135deg, var(--ai-primary), var(--ai-secondary)); 
+      color: white; 
+      box-shadow: var(--ai-shadow-sm);
+    }
+    
+    .ai-btn-primary:hover { 
+      box-shadow: var(--ai-shadow-md);
+      transform: translateY(-2px);
+    }
+    
+    .ai-btn-secondary { 
+      background: #f1f5f9; 
+      color: var(--ai-text-main); 
+    }
+    
+    .ai-btn-secondary:hover { 
+      background: #e2e8f0; 
+    }
+    
+    .ai-status { 
+      margin-top: 16px; 
+      padding: 12px 14px; 
+      border-radius: var(--ai-radius-sm); 
+      font-size: 13px; 
+      font-weight: 600;
+      text-align: center;
+      display: none; 
+      animation: ai-fade-in 0.3s ease-out;
+    }
+    
+    @keyframes ai-fade-in {
+      from { opacity: 0; transform: translateY(-5px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    
+    .ai-status.success { 
+      display: block; 
+      background: #ecfdf5; 
+      color: #059669; 
+      border: 1px solid #a7f3d0; 
+    }
+    
+    .ai-status.error { 
+      display: block; 
+      background: #fef2f2; 
+      color: #dc2626; 
+      border: 1px solid #fecaca; 
+    }
+    
+    .ai-divider { 
+      height: 1px; 
+      background: var(--ai-border); 
+      margin: 24px 0; 
+    }
+  </style>
+</head>
+<body>
+  <div class="ai-options-container">
+    <div class="ai-header">
+      <h1>AI 상담 어시스턴트 설정</h1>
+      <p class="subtitle">API 키는 브라우저 내부 저장소에 안전하게 보관됩니다.</p>
+    </div>
+
+    <div class="ai-field">
+      <label>Supabase URL <span class="hint">(예: https://xxxxx.supabase.co)</span></label>
+      <input type="text" id="supabaseUrl" class="ai-input" placeholder="https://your-project.supabase.co" autocomplete="off" />
+    </div>
+
+    <div class="ai-field">
+      <label>Supabase Anon Key <span class="hint">(eyJ...로 시작하는 키)</span></label>
+      <input type="password" id="supabaseKey" class="ai-input" placeholder="eyJhbGciOiJIUzI1NiIs..." autocomplete="off" />
+    </div>
+
+    <div class="ai-divider"></div>
+
+    <div class="ai-field">
+      <label>OpenAI API Key <span class="hint">(sk-...로 시작하는 키)</span></label>
+      <input type="password" id="openaiKey" class="ai-input" placeholder="sk-proj-..." autocomplete="off" />
+    </div>
+
+    <div class="ai-actions">
+      <button class="ai-btn ai-btn-secondary" id="showBtn">키 보기/숨기기</button>
+      <button class="ai-btn ai-btn-primary" id="saveBtn">저장하기</button>
+    </div>
+
+    <div class="ai-status" id="status"></div>
+  </div>
+
+  <script src="options.js"></script>
+</body>
+</html>
