@@ -980,7 +980,18 @@
         });
       }
 
+      // 기본 필터: 자기 이름으로 설정 (refreshEmployeeList보다 먼저 설정해야 select UI에 반영됨)
+      const myNameRes = await new Promise(r => chrome.storage.local.get("employeeName", r));
+      if (myNameRes.employeeName) {
+        currentFilter = myNameRes.employeeName;
+      }
+
       await refreshEmployeeList();
+
+      // select UI에도 반영
+      if (myNameRes.employeeName && filterSelect) {
+        filterSelect.value = myNameRes.employeeName;
+      }
 
       // 신규 직원: employeeName 미설정 시 DB 기반 선택 팝업
       const stored = await new Promise(r => chrome.storage.local.get("employeeName", r));
@@ -1031,13 +1042,6 @@
         currentFilter = selectedName;
         if (filterSelect) filterSelect.value = selectedName;
         showToast("'" + selectedName + "' (으)로 설정됨", true);
-      }
-
-      // 기본 필터: 자기 이름으로 설정
-      const myNameRes = await new Promise(r => chrome.storage.local.get("employeeName", r));
-      if (myNameRes.employeeName) {
-        currentFilter = myNameRes.employeeName;
-        if (filterSelect) filterSelect.value = myNameRes.employeeName;
       }
 
       // 반복 todo 자동 생성 (매월 초)

@@ -11,6 +11,38 @@
   let OPENAI_KEY = "";
   let supabase = null;
 
+  // ─── 로그인 이메일 → 직원 이름 매핑 ───
+  let currentEmployeeName = "";
+  function detectCurrentEmployee() {
+    return new Promise((resolve) => {
+      chrome.storage.local.get(["employeeMap"], (result) => {
+        const mapStr = result.employeeMap || "";
+        if (!mapStr) { resolve(""); return; }
+        // 페이지에서 로그인 이메일 찾기 (카카오 비즈니스 우상단)
+        const emailEl = document.querySelector('[class*="email"], [class*="user_email"], [class*="account"]');
+        let pageEmail = "";
+        if (emailEl) pageEmail = emailEl.textContent.trim();
+        // fallback: 페이지 전체에서 이메일 패턴 찾기
+        if (!pageEmail) {
+          const allText = document.body ? document.body.innerText : "";
+          const emailMatch = allText.match(/[\w.-]+@[\w.-]+\.\w{2,}/);
+          if (emailMatch) pageEmail = emailMatch[0];
+        }
+        if (!pageEmail) { resolve(""); return; }
+        // 매핑 파싱: "이메일=이름" 형식
+        const lines = mapStr.split("\n").map(l => l.trim()).filter(Boolean);
+        for (const line of lines) {
+          const [email, name] = line.split("=").map(s => s.trim());
+          if (email && name && pageEmail.toLowerCase() === email.toLowerCase()) {
+            resolve(name);
+            return;
+          }
+        }
+        resolve("");
+      });
+    });
+  }
+
   async function loadApiKeys() {
     return new Promise((resolve) => {
       chrome.storage.local.get(["supabaseUrl", "supabaseKey", "openaiKey"], (result) => {
@@ -283,10 +315,8 @@
         if (!todoTitle) return;
         try {
           const { chatId } = parseChatInfo();
-          let empName = "";
-          try { empName = await new Promise((r) => chrome.storage.local.get("employeeName", (res) => r(res.employeeName || ""))); } catch (e) {}
           const { error } = await supabase.from("todos").insert({
-            chat_id: chatId, content: todoTitle.trim(), status: "pending", assigned_to: empName,
+            chat_id: chatId, content: todoTitle.trim(), status: "pending", assigned_to: currentEmployeeName,
             client_code: clientCode, client_name: clientName,
             message_id: msgId || null, source_type: "human_click",
           });
@@ -911,7 +941,7 @@ JSON 응답 형식: {"replies":["여기에 실제 답변 내용"]}
         console.log("[AI] To-Do API 완료 (" + sec + "초) — 결과:", r.todos?.length || 0, "건, 토큰:", todoTokens);
         const todos = r.todos || [];
         if (todos.length > 0) {
-          const empName = await new Promise((resolve) => chrome.storage.local.get("employeeName", (res) => resolve(res.employeeName || "")));
+          const empName = currentEmployeeName;
           const { clientCode, clientName } = parseClientInfo();
           // 기존 To-Do 조회 (같은 거래처의 pending 항목)
           // 중복 체크: 담당자 무관, 최근 7일 이내 모든 todo 대상
@@ -2068,8 +2098,16 @@ JSON: {"is_salary":bool}`;
   const container = document.createElement("div");
   container.id = "ai-sidebar-container";
 
-  loadApiKeys().then((keysLoaded) => {
+  loadApiKeys().then(async (keysLoaded) => {
     if (!keysLoaded) return;
+    // 페이지 로그인 이메일로 현재 직원 감지
+    currentEmployeeName = await detectCurrentEmployee();
+    // fallback: 매핑 못 찾으면 기존 employeeName 사용
+    if (!currentEmployeeName) {
+      const stored = await new Promise(r => chrome.storage.local.get("employeeName", r));
+      currentEmployeeName = stored.employeeName || "";
+    }
+    console.log("[AI] 현재 직원:", currentEmployeeName);
     return fetch(chrome.runtime.getURL("sidebar.html")).then((res) => res.text());
   }).then((html) => {
     if (!html) return;
