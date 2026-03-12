@@ -1979,7 +1979,7 @@ JSON: {"is_salary":bool}`;
       });
       folderBtn.addEventListener("mouseenter", () => { folderBtn.style.transform = "scale(1.1)"; });
       folderBtn.addEventListener("mouseleave", () => { folderBtn.style.transform = "scale(1)"; });
-      folderBtn.addEventListener("click", (e) => {
+      folderBtn.addEventListener("click", async (e) => {
         e.preventDefault();
         e.stopPropagation();
         const { clientCode } = parseClientInfo();
@@ -1987,8 +1987,22 @@ JSON: {"is_salary":bool}`;
           showToast("거래처 코드를 찾을 수 없습니다.", false);
           return;
         }
-        chrome.runtime.sendMessage({ type: "open-client-folder", clientCode }, (res) => {
-          if (res && !res.success) showToast(res.error || "폴더 열기 실패", false);
+        // 네이티브 호스트 시도, 실패 시 클립보드 복사 fallback
+        chrome.runtime.sendMessage({ type: "open-client-folder", clientCode }, async (res) => {
+          if (res && !res.success) {
+            const basePath = await new Promise(r => chrome.storage.local.get("clientFolderPath", r)).then(r => r.clientFolderPath || "");
+            if (!basePath) {
+              showToast("옵션에서 거래처 폴더 경로를 설정해주세요.", false);
+              return;
+            }
+            const folderPath = basePath.replace(/\\$/, "") + "\\" + clientCode;
+            try {
+              await navigator.clipboard.writeText(folderPath);
+              showToast("경로 복사됨 — Win+E → 붙여넣기", true);
+            } catch (err) {
+              showToast("경로: " + folderPath, true);
+            }
+          }
         });
       });
       toolbar.appendChild(folderBtn);

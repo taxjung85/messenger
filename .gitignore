@@ -13,3 +13,6 @@
 # 민감 정보 제외
 deploy_config.json
 .env*
+
+# PC별 생성 파일 (네이티브 호스트 매니페스트)
+extension/com.jungsem.messenger.json
