@@ -36,17 +36,31 @@ with open(manifest_path, "w", encoding="utf-8") as f:
 print(f"[1/3] manifest.json → v{version}")
 
 # ─── 2. Supabase settings 업데이트 ───
-url = f'{config["url"]}/rest/v1/settings?key=eq.app_version'
-data = json.dumps({"value": version}).encode("utf-8")
-req = urllib.request.Request(url, data=data, method="PATCH", headers={
+supa_headers = {
     "apikey": config["key"],
     "Authorization": f'Bearer {config["key"]}',
     "Content-Type": "application/json",
-    "Prefer": "return=minimal",
-})
+}
 try:
-    urllib.request.urlopen(req)
-    print(f"[2/3] Supabase settings → v{version}")
+    # PATCH (기존 행 업데이트 시도) — return=representation으로 실제 반영 여부 확인
+    url = f'{config["url"]}/rest/v1/settings?key=eq.app_version'
+    data = json.dumps({"value": version}).encode("utf-8")
+    req = urllib.request.Request(url, data=data, method="PATCH", headers={
+        **supa_headers, "Prefer": "return=representation",
+    })
+    resp = urllib.request.urlopen(req)
+    body = json.loads(resp.read().decode("utf-8"))
+    if body:
+        print(f"[2/3] Supabase settings → v{version}")
+    else:
+        # PATCH 매칭 행 없음 → UPSERT로 새로 생성
+        url2 = f'{config["url"]}/rest/v1/settings'
+        data2 = json.dumps({"key": "app_version", "value": version}).encode("utf-8")
+        req2 = urllib.request.Request(url2, data=data2, method="POST", headers={
+            **supa_headers, "Prefer": "resolution=merge-duplicates",
+        })
+        urllib.request.urlopen(req2)
+        print(f"[2/3] Supabase settings → v{version} (신규 생성)")
 except Exception as e:
     print(f"[2/3] Supabase 업데이트 실패: {e}")
 
@@ -79,13 +93,11 @@ try:
         assets = json.loads(result.stdout).get("assets", [])
         if assets:
             download_url = assets[0].get("url", "")
-            dl_api_url = f'{config["url"]}/rest/v1/settings?key=eq.download_url'
-            dl_data = json.dumps({"value": download_url}).encode("utf-8")
-            dl_req = urllib.request.Request(dl_api_url, data=dl_data, method="PATCH", headers={
-                "apikey": config["key"],
-                "Authorization": f'Bearer {config["key"]}',
-                "Content-Type": "application/json",
-                "Prefer": "return=minimal",
+            # UPSERT로 download_url 저장 (행이 없어도 생성됨)
+            dl_api_url = f'{config["url"]}/rest/v1/settings'
+            dl_data = json.dumps({"key": "download_url", "value": download_url}).encode("utf-8")
+            dl_req = urllib.request.Request(dl_api_url, data=dl_data, method="POST", headers={
+                **supa_headers, "Prefer": "resolution=merge-duplicates",
             })
             urllib.request.urlopen(dl_req)
             print(f"    Supabase download_url 업데이트 완료")
