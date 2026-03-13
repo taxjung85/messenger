@@ -201,6 +201,17 @@ chrome.alarms.get("recurring-notify", (a) => {
 });
 // version-check 알람 제거 (content-list.js에서 접속 시 체크)
 
+// ─── 버전 비교 (semver) ───
+function isNewerVersion(remote, local) {
+  const r = remote.split(".").map(Number);
+  const l = local.split(".").map(Number);
+  for (let i = 0; i < Math.max(r.length, l.length); i++) {
+    if ((r[i] || 0) > (l[i] || 0)) return true;
+    if ((r[i] || 0) < (l[i] || 0)) return false;
+  }
+  return false;
+}
+
 // ─── 버전 체크 ───
 async function checkVersionUpdate() {
   try {
@@ -208,7 +219,7 @@ async function checkVersionUpdate() {
     if (!data || data.length === 0) return;
     const remoteVersion = data[0].value;
     const localVersion = chrome.runtime.getManifest().version;
-    if (remoteVersion === localVersion) return;
+    if (!isNewerVersion(remoteVersion, localVersion)) return;
     console.log("[AI BG] 새 버전 감지:", localVersion, "→", remoteVersion);
     chrome.notifications.create("version-update", {
       type: "basic",

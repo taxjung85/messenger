@@ -1179,10 +1179,18 @@
       // 반복 일정 헤더 집계 표시 (접혀있어도 보이도록 초기 로드)
       renderRecurringList();
 
-      // 버전 체크 (접속 시 1회)
+      // 버전 체크 (접속 시 1회) — remote > local 일 때만
+      function isNewerVersion(remote, local) {
+        const r = remote.split(".").map(Number), l = local.split(".").map(Number);
+        for (let i = 0; i < Math.max(r.length, l.length); i++) {
+          if ((r[i] || 0) > (l[i] || 0)) return true;
+          if ((r[i] || 0) < (l[i] || 0)) return false;
+        }
+        return false;
+      }
       try {
         const { data: verData } = await supabase.from("settings").select("value").eq("key", "app_version").single();
-        if (verData && verData.value !== chrome.runtime.getManifest().version) {
+        if (verData && isNewerVersion(verData.value, chrome.runtime.getManifest().version)) {
           const toast = document.createElement("div");
           toast.innerHTML = '🔄 새 버전 <b>v' + verData.value + '</b> 사용 가능 — <u>클릭하여 새로고침</u>';
           Object.assign(toast.style, {
