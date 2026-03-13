@@ -18,10 +18,10 @@ try:
 except FileNotFoundError:
     pass
 
-if not config.get("url") or not config.get("key"):
+if not config.get("url") or not config.get("service_key"):
     print("\n[초기 설정] Supabase 정보를 입력하세요 (한번만 입력하면 저장됩니다)")
-    config["url"] = input("Supabase URL: ").strip()
-    config["key"] = input("Supabase Anon Key: ").strip()
+    config["url"] = config.get("url") or input("Supabase URL: ").strip()
+    config["service_key"] = input("Supabase Service Role Key: ").strip()
     with open(config_file, "w", encoding="utf-8") as f:
         json.dump(config, f)
     print(f"[저장됨] {config_file}\n")
@@ -36,9 +36,11 @@ with open(manifest_path, "w", encoding="utf-8") as f:
 print(f"[1/3] manifest.json → v{version}")
 
 # ─── 2. Supabase settings 업데이트 ───
+# service_role key는 RLS를 우회하므로 settings 테이블 쓰기 가능
+supa_key = config["service_key"]
 supa_headers = {
-    "apikey": config["key"],
-    "Authorization": f'Bearer {config["key"]}',
+    "apikey": supa_key,
+    "Authorization": f'Bearer {supa_key}',
     "Content-Type": "application/json",
 }
 try:
