@@ -3,7 +3,7 @@ Chrome Native Messaging Host
 - 거래처 폴더 열기
 - 다운로드 파일을 거래처 폴더로 이동
 """
-import sys, json, struct, subprocess, os, shutil, glob, time
+import sys, json, struct, subprocess, os, shutil, glob, time, zipfile, urllib.request, tempfile
 
 def read_message():
     raw = sys.stdin.buffer.read(4)
@@ -62,6 +62,24 @@ def main():
                 return
             shutil.move(src, dst)
             send_message({'success': True, 'path': dst})
+        except Exception as e:
+            send_message({'success': False, 'error': str(e)})
+
+    elif action == 'update':
+        download_url = msg.get('downloadUrl', '')
+        target_dir = msg.get('targetDir', r'C:\extension')
+        if not download_url:
+            send_message({'success': False, 'error': 'downloadUrl 없음'})
+            return
+        try:
+            tmp = tempfile.mktemp(suffix='.zip')
+            urllib.request.urlretrieve(download_url, tmp)
+            if os.path.exists(target_dir):
+                shutil.rmtree(target_dir)
+            with zipfile.ZipFile(tmp, 'r') as zf:
+                zf.extractall(os.path.dirname(target_dir))
+            os.remove(tmp)
+            send_message({'success': True, 'path': target_dir})
         except Exception as e:
             send_message({'success': False, 'error': str(e)})
 

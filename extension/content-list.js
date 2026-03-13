@@ -1,12 +1,68 @@
 (function () {
   "use strict";
 
+  // ─── OAuth 콜백 감지 (Google 로그인 후 리다이렉트) ───
+  if (window.location.hash && window.location.hash.includes("access_token")) {
+    const hashParams = new URLSearchParams(window.location.hash.substring(1));
+    const accessToken = hashParams.get("access_token");
+    const refreshToken = hashParams.get("refresh_token");
+    if (accessToken) {
+      chrome.runtime.sendMessage({
+        type: "oauth-callback",
+        accessToken: accessToken,
+        refreshToken: refreshToken || "",
+      });
+      history.replaceState(null, "", window.location.pathname + window.location.search);
+    }
+  }
+
   // 채팅방 안이면 실행하지 않음 (content.js가 담당)
   if (/\/chats\/\d+/.test(location.pathname)) return;
   if (document.getElementById("ai-sidebar-container")) return;
 
   // ─── Supabase 설정 (chrome.storage에서 로드) ───
   let supabase = null;
+
+  // ─── Supabase 프록시 클라이언트 (background.js 경유) ───
+  function createProxyClient() {
+    function from(table) {
+      let method = "GET", params = [], body = null, isSingle = false, wantReturn = false;
+      const b = {
+        select(cols) { if (cols) params.push("select=" + encodeURIComponent(cols)); else params.push("select=*"); method = method === "GET" ? "GET" : method; wantReturn = true; return b; },
+        eq(col, val) { params.push(encodeURIComponent(col) + "=eq." + encodeURIComponent(val)); return b; },
+        neq(col, val) { params.push(encodeURIComponent(col) + "=neq." + encodeURIComponent(val)); return b; },
+        gt(col, val) { params.push(encodeURIComponent(col) + "=gt." + encodeURIComponent(val)); return b; },
+        gte(col, val) { params.push(encodeURIComponent(col) + "=gte." + encodeURIComponent(val)); return b; },
+        lt(col, val) { params.push(encodeURIComponent(col) + "=lt." + encodeURIComponent(val)); return b; },
+        lte(col, val) { params.push(encodeURIComponent(col) + "=lte." + encodeURIComponent(val)); return b; },
+        is(col, val) { params.push(encodeURIComponent(col) + "=is." + val); return b; },
+        in(col, vals) { params.push(encodeURIComponent(col) + "=in.(" + vals.map(v => encodeURIComponent(v)).join(",") + ")"); return b; },
+        not(col, op, val) { params.push(encodeURIComponent(col) + "=not." + op + "." + encodeURIComponent(val)); return b; },
+        or(expr) { params.push("or=(" + expr + ")"); return b; },
+        order(col, opts) { params.push("order=" + encodeURIComponent(col) + "." + (opts && opts.ascending === false ? "desc" : "asc")); return b; },
+        limit(n) { params.push("limit=" + n); return b; },
+        single() { isSingle = true; return b; },
+        insert(data) { method = "POST"; body = data; return b; },
+        update(data) { method = "PATCH"; body = data; return b; },
+        delete() { method = "DELETE"; return b; },
+        upsert(data) { method = "POST"; body = data; return b; },
+        then(resolve, reject) {
+          chrome.runtime.sendMessage({
+            type: "supabase-query",
+            table, method, params, body, isSingle, wantReturn,
+          }, (res) => {
+            if (chrome.runtime.lastError) {
+              resolve({ data: null, error: { message: chrome.runtime.lastError.message } });
+            } else {
+              resolve(res || { data: null, error: { message: "no response" } });
+            }
+          });
+        },
+      };
+      return b;
+    }
+    return { from };
+  }
 
   let currentFilter = "all"; // "all" | 직원이름
 
@@ -80,59 +136,108 @@
     });
   }
 
-  // ─── DD 전용 날짜 입력 팝업 (올해/이번달 기준, DD만 입력) ───
+  // ─── 달력 팝업 (월간 캘린더 UI) ───
   function showDayPopup(title, currentDay) {
     return new Promise((resolve) => {
       const overlay = document.createElement("div");
       overlay.className = "ai-popup-overlay";
       const box = document.createElement("div");
       box.className = "ai-popup-box";
+      box.style.width = "300px";
+      box.style.padding = "20px";
+
       const now = new Date();
       const kst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
-      const yyyy = kst.getFullYear();
-      const mm = String(kst.getMonth() + 1).padStart(2, "0");
-      box.innerHTML = `
-        <div class="ai-popup-title">${title}</div>
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px;">
-          <span style="font-size:14px;font-weight:700;color:var(--ai-primary);">${yyyy}년 ${mm}월</span>
-          <input type="number" id="ai-day-popup-field" min="1" max="31" value="${currentDay || ""}"
-            placeholder="DD" style="width:60px;text-align:center;padding:8px;border:1.5px solid #d1d5db;border-radius:10px;font-size:16px;font-weight:700;outline:none;transition:border 0.2s;background:#f8fafc;" />
-          <span style="font-size:14px;font-weight:600;color:var(--ai-text-muted);">일</span>
-        </div>
-        <div style="display:flex;gap:8px;">
-          <button id="ai-day-popup-ok" class="ai-btn ai-btn-gradient" style="flex:1;">확인</button>
-          <button id="ai-day-popup-cancel" class="ai-btn ai-btn-secondary" style="flex:1;">취소</button>
-          <button id="ai-day-popup-clear" class="ai-btn" style="flex:0.6;background:#fee2e2;color:#dc2626;font-size:12px;">삭제</button>
-        </div>
-      `;
+      const todayY = kst.getFullYear(), todayM = kst.getMonth(), todayD = kst.getDate();
+      let viewY = todayY, viewM = todayM;
+      let selectedDate = null;
+
+      // 기존 값이 있으면 선택 상태로
+      if (currentDay) {
+        selectedDate = { year: todayY, month: todayM + 1, day: parseInt(currentDay) };
+      }
+
+      const DAYS = ["일", "월", "화", "수", "목", "금", "토"];
+
+      function render() {
+        const firstDay = new Date(viewY, viewM, 1).getDay();
+        const lastDate = new Date(viewY, viewM + 1, 0).getDate();
+        const monthLabel = `${viewY}년 ${String(viewM + 1).padStart(2, "0")}월`;
+
+        box.innerHTML = `
+          <div class="ai-popup-title" style="margin-bottom:12px;">${title}</div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+            <button id="ai-cal-prev" style="border:none;background:none;cursor:pointer;font-size:18px;padding:4px 8px;border-radius:6px;color:#6366f1;font-weight:700;">◀</button>
+            <span style="font-size:14px;font-weight:700;color:#6366f1;">${monthLabel}</span>
+            <button id="ai-cal-next" style="border:none;background:none;cursor:pointer;font-size:18px;padding:4px 8px;border-radius:6px;color:#6366f1;font-weight:700;">▶</button>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;margin-bottom:8px;">
+            ${DAYS.map((d, i) => `<div style="text-align:center;font-size:11px;font-weight:600;padding:4px 0;color:${i === 0 ? '#ef4444' : i === 6 ? '#3b82f6' : '#6b7280'};">${d}</div>`).join("")}
+          </div>
+          <div id="ai-cal-grid" style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;"></div>
+          <div style="display:flex;gap:8px;margin-top:14px;">
+            <button id="ai-day-popup-ok" class="ai-btn ai-btn-gradient" style="flex:1;">확인</button>
+            <button id="ai-day-popup-cancel" class="ai-btn ai-btn-secondary" style="flex:1;">취소</button>
+            <button id="ai-day-popup-clear" class="ai-btn" style="flex:0.6;background:#fee2e2;color:#dc2626;font-size:12px;">삭제</button>
+          </div>
+        `;
+
+        const grid = box.querySelector("#ai-cal-grid");
+
+        // 빈 셀 (첫째 주 앞)
+        for (let i = 0; i < firstDay; i++) {
+          const empty = document.createElement("div");
+          empty.style.cssText = "width:36px;height:36px;";
+          grid.appendChild(empty);
+        }
+
+        // 날짜 셀
+        for (let d = 1; d <= lastDate; d++) {
+          const cell = document.createElement("div");
+          const dayOfWeek = (firstDay + d - 1) % 7;
+          const isToday = (viewY === todayY && viewM === todayM && d === todayD);
+          const isSelected = selectedDate && (viewY === selectedDate.year && (viewM + 1) === selectedDate.month && d === selectedDate.day);
+
+          cell.textContent = d;
+          cell.style.cssText = `
+            width:36px;height:36px;display:flex;align-items:center;justify-content:center;
+            border-radius:50%;font-size:13px;font-weight:600;cursor:pointer;transition:all 0.15s;
+            ${isSelected ? 'background:#6366f1;color:white;' : isToday ? 'box-shadow:inset 0 0 0 2px #6366f1;color:#6366f1;' : ''}
+            ${!isSelected && dayOfWeek === 0 ? 'color:#ef4444;' : ''}
+            ${!isSelected && dayOfWeek === 6 ? 'color:#3b82f6;' : ''}
+          `;
+
+          cell.addEventListener("mouseenter", () => {
+            if (!isSelected) cell.style.background = "#e0e7ff";
+          });
+          cell.addEventListener("mouseleave", () => {
+            if (!isSelected) cell.style.background = "";
+          });
+          cell.addEventListener("click", () => {
+            selectedDate = { year: viewY, month: viewM + 1, day: d };
+            render();
+          });
+
+          grid.appendChild(cell);
+        }
+
+        // 이벤트 바인딩
+        box.querySelector("#ai-cal-prev").onclick = () => { viewM--; if (viewM < 0) { viewM = 11; viewY--; } render(); };
+        box.querySelector("#ai-cal-next").onclick = () => { viewM++; if (viewM > 11) { viewM = 0; viewY++; } render(); };
+
+        const close = (val) => { overlay.remove(); resolve(val); };
+        box.querySelector("#ai-day-popup-ok").onclick = () => {
+          if (!selectedDate) return;
+          close(selectedDate);
+        };
+        box.querySelector("#ai-day-popup-cancel").onclick = () => close(null);
+        box.querySelector("#ai-day-popup-clear").onclick = () => close(-1);
+        overlay.onclick = (ev) => { if (ev.target === overlay) close(null); };
+      }
+
       overlay.appendChild(box);
       document.body.appendChild(overlay);
-      const input = box.querySelector("#ai-day-popup-field");
-      input.focus(); input.select();
-      input.addEventListener("focus", () => { input.style.borderColor = "#6366f1"; });
-      input.addEventListener("blur", () => { input.style.borderColor = "#d1d5db"; });
-      // 2자리 강제
-      input.addEventListener("input", () => {
-        let v = input.value.replace(/\D/g, "");
-        if (v.length > 2) v = v.substring(0, 2);
-        const n = parseInt(v);
-        if (n > 31) v = "31";
-        if (n < 0) v = "";
-        input.value = v;
-      });
-      const close = (val) => { overlay.remove(); resolve(val); };
-      box.querySelector("#ai-day-popup-ok").onclick = () => {
-        const v = parseInt(input.value);
-        if (!v || v < 1 || v > 31) { input.style.borderColor = "#ef4444"; return; }
-        close(v);
-      };
-      box.querySelector("#ai-day-popup-cancel").onclick = () => close(null);
-      box.querySelector("#ai-day-popup-clear").onclick = () => close(-1); // -1 = 삭제
-      overlay.addEventListener("click", (ev) => { if (ev.target === overlay) close(null); });
-      input.addEventListener("keydown", (ev) => {
-        if (ev.key === "Enter") box.querySelector("#ai-day-popup-ok").click();
-        if (ev.key === "Escape") close(null);
-      });
+      render();
     });
   }
 
@@ -487,23 +592,24 @@
         }
       });
 
-      // 일자 클릭 → DD 팝업
+      // 일자 클릭 → 달력 팝업
       item.querySelector(".ai-day-chip").addEventListener("click", async (e) => {
         e.stopPropagation();
         const result = await showDayPopup("반복 일자 변경", r.day_of_month);
         if (result === null || result === -1) return;
-        if (result !== r.day_of_month) {
-          await supabase.from("recurring_todos").update({ day_of_month: result }).eq("id", r.id);
+        const newDay = result.day;
+        if (newDay !== r.day_of_month) {
+          await supabase.from("recurring_todos").update({ day_of_month: newDay }).eq("id", r.id);
           const todayStr = getKSTToday();
           const ym = todayStr.substring(0, 7);
           const ld = new Date(parseInt(ym.substring(0, 4)), parseInt(ym.substring(5, 7)), 0).getDate();
-          const td = Math.min(result, ld);
+          const td = Math.min(newDay, ld);
           const tDate = ym + "-" + String(td).padStart(2, "0");
           const aDate = prevBusinessDay(tDate);
           await supabase.from("todos").update({ recurring_date: aDate })
             .eq("recurring_id", r.id)
             .gte("created_at", ym + "-01T00:00:00+09:00");
-          showToast((result === 31 ? "말일" : result + "일") + "로 변경됨", true);
+          showToast((newDay === 31 ? "말일" : newDay + "일") + "로 변경됨", true);
         }
         renderRecurringList();
       });
@@ -661,7 +767,7 @@
         }
       });
 
-      // 기한 클릭 → DD 팝업
+      // 기한 클릭 → 달력 팝업
       card.querySelector(".ai-day-chip").addEventListener("click", async (e) => {
         e.stopPropagation();
         const result = await showDayPopup("기한 설정", dueDay || "");
@@ -670,11 +776,9 @@
           // 삭제
           await supabase.from("todos").update({ due_date: null }).eq("id", todo.id);
         } else {
-          const now = new Date();
-          const kst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
-          const yyyy = kst.getFullYear();
-          const mm = String(kst.getMonth() + 1).padStart(2, "0");
-          const dd = String(result).padStart(2, "0");
+          const yyyy = result.year;
+          const mm = String(result.month).padStart(2, "0");
+          const dd = String(result.day).padStart(2, "0");
           await supabase.from("todos").update({ due_date: yyyy + "-" + mm + "-" + dd }).eq("id", todo.id);
         }
         renderTodos(await loadTodos());
@@ -775,17 +879,31 @@
 
   const sidebarURL = chrome.runtime.getURL("sidebar-list.html");
 
-  new Promise((resolve) => {
-    chrome.storage.local.get(["supabaseUrl", "supabaseKey"], (result) => {
-      if (!result.supabaseUrl || !result.supabaseKey) {
-        showToast("API 키가 설정되지 않았습니다. 옵션 페이지에서 등록해주세요.", false);
-        resolve(false);
-        return;
+  (async function loadConfig() {
+    // 1) 인증 기반 설정 로딩
+    try {
+      const authConfig = await new Promise((r) => chrome.runtime.sendMessage({ type: "get-auth-config" }, r));
+      if (authConfig && authConfig.authenticated && authConfig.supabaseUrl) {
+        supabase = createProxyClient();
+        if (authConfig.employeeMap) {
+          chrome.storage.local.set({ employeeMap: authConfig.employeeMap });
+        }
+        return true;
       }
-      supabase = window.supabase.createClient(result.supabaseUrl, result.supabaseKey);
-      resolve(true);
+    } catch (e) { /* fallback */ }
+    // 2) fallback: 수동 입력 값
+    return new Promise((resolve) => {
+      chrome.storage.local.get(["supabaseUrl", "supabaseKey"], (result) => {
+        if (!result.supabaseUrl || !result.supabaseKey) {
+          showToast("로그인이 필요합니다. 채팅 페이지에서 로그인해주세요.", false);
+          resolve(false);
+          return;
+        }
+        supabase = createProxyClient();
+        resolve(true);
+      });
     });
-  }).then((ok) => {
+  })().then((ok) => {
     if (!ok) return;
     return fetch(sidebarURL).then((res) => res.text());
   }).then(async (html) => {
@@ -1145,14 +1263,18 @@
         }
         if (msg.type === "version-update") {
           const toast = document.createElement("div");
-          toast.innerHTML = '🔄 새 버전 <b>v' + msg.version + '</b> 사용 가능 — <u>클릭하여 새로고침</u>';
+          toast.innerHTML = '🔄 새 버전 <b>v' + msg.version + '</b> 사용 가능 — <u>클릭하여 업데이트</u>';
           Object.assign(toast.style, {
             position: "fixed", bottom: "30px", left: "50%", transform: "translateX(-50%)",
             padding: "12px 24px", borderRadius: "10px", fontSize: "13px", fontWeight: "600", zIndex: "999999",
             color: "white", background: "linear-gradient(135deg,#6366f1,#8b5cf6)",
             boxShadow: "0 4px 16px rgba(99,102,241,0.35)", cursor: "pointer",
           });
-          toast.addEventListener("click", () => chrome.runtime.sendMessage({ type: "reload-extension" }));
+          toast.addEventListener("click", () => {
+            toast.innerHTML = '⏳ 업데이트 중...';
+            toast.style.pointerEvents = 'none';
+            chrome.runtime.sendMessage({ type: "trigger-update" });
+          });
           document.body.appendChild(toast);
         }
       });

@@ -1,4 +1,4 @@
-import json, os, subprocess, sys, urllib.request
+import json, os, shutil, subprocess, sys, urllib.request, zipfile
 
 # 스크립트가 있는 디렉토리로 이동 (git 명령어 등이 제대로 동작하도록)
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
@@ -54,6 +54,57 @@ except Exception as e:
 subprocess.run(["git", "add", "extension/", "deploy.py", "deploy.bat", ".gitignore"], check=True)
 subprocess.run(["git", "commit", "-m", f"v{version}"], check=True)
 subprocess.run(["git", "push", "origin", "main"], check=True)
-print(f"[3/3] GitHub 푸시 완료")
+print(f"[3/5] GitHub 푸시 완료")
+
+# ─── 4. GitHub Release 생성 (zip 첨부) ───
+src_ext = os.path.join(os.path.dirname(os.path.abspath(__file__)), "extension")
+zip_name = f"extension-v{version}.zip"
+zip_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), zip_name)
+with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+    for root, dirs, files in os.walk(src_ext):
+        for f in files:
+            full = os.path.join(root, f)
+            arc = os.path.join("extension", os.path.relpath(full, src_ext))
+            zf.write(full, arc)
+try:
+    subprocess.run(["gh", "release", "create", f"v{version}", zip_path,
+                     "--title", f"v{version}", "--notes", f"v{version} 릴리스"],
+                    check=True)
+    print(f"[4/5] GitHub Release v{version} 생성 완료")
+    # Supabase에 download_url 저장
+    # gh api로 릴리스 에셋 URL 가져오기
+    result = subprocess.run(["gh", "release", "view", f"v{version}", "--json", "assets"],
+                            capture_output=True, text=True)
+    if result.returncode == 0:
+        assets = json.loads(result.stdout).get("assets", [])
+        if assets:
+            download_url = assets[0].get("url", "")
+            dl_api_url = f'{config["url"]}/rest/v1/settings?key=eq.download_url'
+            dl_data = json.dumps({"value": download_url}).encode("utf-8")
+            dl_req = urllib.request.Request(dl_api_url, data=dl_data, method="PATCH", headers={
+                "apikey": config["key"],
+                "Authorization": f'Bearer {config["key"]}',
+                "Content-Type": "application/json",
+                "Prefer": "return=minimal",
+            })
+            urllib.request.urlopen(dl_req)
+            print(f"    Supabase download_url 업데이트 완료")
+except FileNotFoundError:
+    print(f"[4/5] gh CLI 미설치 — Release 생성 건너뜀")
+except Exception as e:
+    print(f"[4/5] GitHub Release 실패: {e}")
+finally:
+    if os.path.exists(zip_path):
+        os.remove(zip_path)
+
+# ─── 5. 로컬 확장 폴더에 복사 (Chrome 유지용) ───
+local_ext = r"C:\extension"
+try:
+    if os.path.exists(local_ext):
+        shutil.rmtree(local_ext)
+    shutil.copytree(src_ext, local_ext)
+    print(f"[5/5] C:\\extension\\ 복사 완료")
+except Exception as e:
+    print(f"[5/5] 로컬 복사 실패: {e}")
 
 print(f"\n===== v{version} 배포 완료 =====")

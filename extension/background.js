@@ -1,19 +1,110 @@
-// ─── Supabase 설정 (chrome.storage에서 로드) ───
+// ─── Supabase 설정 (하드코딩 — anon key는 공개용) ───
+const SUPABASE_URL = "https://gwirtvvbscwriqmoxqyv.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd3aXJ0dnZic2N3cmlxbW94cXl2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMwNjc5NzUsImV4cCI6MjA4ODY0Mzk3NX0.LgO1hrzhPUgYNzO6YyoVPIpBMMETCZjimvHUkNjQ2ew";
+
 async function getKeys() {
-  return new Promise((resolve) => {
-    chrome.storage.local.get(["supabaseUrl", "supabaseKey"], (result) => {
-      resolve({ url: result.supabaseUrl || "", key: result.supabaseKey || "" });
-    });
+  return { url: SUPABASE_URL, key: SUPABASE_ANON_KEY };
+}
+
+// ─── Google 로그인 (content script 콜백 방식 — 추가 권한 불필요) ───
+let _oauthResolve = null;
+
+async function loginWithGoogle() {
+  // 카카오 비즈니스 페이지로 리다이렉트 → content script가 토큰 캡처
+  const redirectUrl = "https://business.kakao.com/";
+  const authUrl = SUPABASE_URL + "/auth/v1/authorize?provider=google&redirect_to=" + encodeURIComponent(redirectUrl);
+
+  return new Promise((resolve, reject) => {
+    _oauthResolve = resolve;
+    chrome.tabs.create({ url: authUrl });
+    // 2분 타임아웃
+    setTimeout(() => {
+      if (_oauthResolve) { _oauthResolve = null; reject("로그인 시간 초과"); }
+    }, 120000);
   });
+}
+
+// ─── 토큰 자동 갱신 ───
+async function refreshAccessToken() {
+  const refreshToken = await new Promise(r => chrome.storage.local.get("authRefreshToken", res => r(res.authRefreshToken)));
+  if (!refreshToken) return null;
+  try {
+    const res = await fetch(SUPABASE_URL + "/auth/v1/token?grant_type=refresh_token", {
+      method: "POST",
+      headers: {
+        apikey: SUPABASE_ANON_KEY,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+    if (!res.ok) {
+      console.error("[AI BG] 토큰 갱신 실패:", res.status);
+      return null;
+    }
+    const data = await res.json();
+    if (data.access_token) {
+      chrome.storage.local.set({
+        authAccessToken: data.access_token,
+        authRefreshToken: data.refresh_token || refreshToken,
+      });
+      console.log("[AI BG] 토큰 갱신 완료");
+      return data.access_token;
+    }
+    return null;
+  } catch (e) {
+    console.error("[AI BG] 토큰 갱신 에러:", e.message);
+    return null;
+  }
+}
+
+async function getValidToken() {
+  let token = await new Promise(r => chrome.storage.local.get("authAccessToken", res => r(res.authAccessToken)));
+  if (!token) return null;
+  // JWT 만료 체크 (exp claim)
+  try {
+    const payload = JSON.parse(atob(token.split(".")[1]));
+    const now = Math.floor(Date.now() / 1000);
+    if (payload.exp && payload.exp < now + 60) {
+      // 만료됨 또는 1분 내 만료 → 갱신
+      console.log("[AI BG] 토큰 만료 감지, 갱신 시도...");
+      token = await refreshAccessToken();
+    }
+  } catch (e) {
+    // JWT 파싱 실패 → 그냥 사용
+  }
+  return token;
+}
+
+// ─── 인증된 상태에서 settings 읽기 ───
+async function fetchAuthSettings(accessToken) {
+  try {
+    // 전달된 토큰 대신 유효한 토큰 사용
+    const validToken = await getValidToken() || accessToken;
+    const res = await fetch(SUPABASE_URL + "/rest/v1/settings?select=key,value", {
+      headers: {
+        apikey: SUPABASE_ANON_KEY,
+        Authorization: "Bearer " + validToken,
+      }
+    });
+    if (!res.ok) return null;
+    const rows = await res.json();
+    const map = {};
+    for (const r of rows) map[r.key] = r.value;
+    return map;
+  } catch (e) {
+    return null;
+  }
 }
 
 // ─── Supabase REST 헬퍼 ───
 async function supaRest(method, table, params, body) {
   const { url, key } = await getKeys();
   if (!url || !key) return null;
+  // RLS 통과를 위해 유효한 auth token 사용 (없으면 anon key fallback)
+  const authToken = await getValidToken();
   const headers = {
     apikey: key,
-    Authorization: "Bearer " + key,
+    Authorization: "Bearer " + (authToken || key),
     "Content-Type": "application/json",
     Prefer: method === "POST" ? "return=minimal" : "",
   };
@@ -56,7 +147,26 @@ function getKSTToday() {
 }
 
 // ─── 알람 등록 + 확장프로그램 리로드 후 탭 새로고침 ───
+// ─── 네이티브 호스트 자동 설치 체크 ───
+function checkNativeHost() {
+  chrome.runtime.sendNativeMessage("com.jungsem.messenger", { action: "ping" }, (res) => {
+    if (chrome.runtime.lastError || !res || !res.success) {
+      console.log("[AI BG] 네이티브 호스트 미연결 — install_host.bat 실행 필요");
+      chrome.notifications.create("native-setup", {
+        type: "basic",
+        iconUrl: "icons/icon128.png",
+        title: "채널에이전트 초기 설정",
+        message: "거래처 폴더 기능을 사용하려면 extension 폴더의 install_host.bat을 1회 실행해주세요.",
+      });
+    } else {
+      console.log("[AI BG] 네이티브 호스트 연결 OK");
+    }
+  });
+}
+
 chrome.runtime.onInstalled.addListener(() => {
+  // 네이티브 호스트 연결 체크
+  checkNativeHost();
   // 1시간 간격 기본 체크 알람
   chrome.alarms.create("todo-check", { periodInMinutes: 60 });
   // 반복 todo 생성용 (매일 오전 8시 KST 체크)
@@ -119,12 +229,37 @@ async function checkVersionUpdate() {
   }
 }
 
-// 알림 클릭 → 확장프로그램 리로드 후 탭 새로고침
-chrome.notifications.onClicked.addListener((notifId) => {
+// 알림 클릭 → 다운로드 + 업데이트 + 리로드
+chrome.notifications.onClicked.addListener(async (notifId) => {
   if (notifId === "version-update") {
-    chrome.storage.local.set({ pendingTabReload: true }, () => {
-      chrome.runtime.reload();
-    });
+    try {
+      // Supabase에서 download_url 조회
+      const dlData = await supaRest("GET", "settings", "select=value&key=eq.download_url");
+      const downloadUrl = dlData && dlData[0] && dlData[0].value;
+      if (!downloadUrl) {
+        // URL 없으면 기존 방식 (리로드만)
+        chrome.storage.local.set({ pendingTabReload: true }, () => chrome.runtime.reload());
+        return;
+      }
+      // native host로 다운로드 + 압축해제
+      chrome.runtime.sendNativeMessage("com.jungsem.messenger", {
+        action: "update",
+        downloadUrl: downloadUrl,
+        targetDir: "C:\\extension"
+      }, (response) => {
+        if (response && response.success) {
+          console.log("[AI BG] 업데이트 완료:", response.path);
+          chrome.storage.local.set({ pendingTabReload: true }, () => chrome.runtime.reload());
+        } else {
+          console.error("[AI BG] 업데이트 실패:", response && response.error);
+          // 실패 시 기존 방식 폴백
+          chrome.storage.local.set({ pendingTabReload: true }, () => chrome.runtime.reload());
+        }
+      });
+    } catch (e) {
+      console.error("[AI BG] 업데이트 오류:", e);
+      chrome.storage.local.set({ pendingTabReload: true }, () => chrome.runtime.reload());
+    }
   }
 });
 
@@ -294,11 +429,91 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 
 // ─── content script 메시지 핸들러 ───
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  // Google 로그인 요청
+  if (msg.type === "google-login") {
+    loginWithGoogle().then((result) => {
+      sendResponse({ success: true, email: result.email });
+    }).catch((err) => {
+      sendResponse({ success: false, error: String(err) });
+    });
+    return true;
+  }
+
+  // OAuth 콜백 (content script에서 토큰 전달)
+  if (msg.type === "oauth-callback") {
+    if (msg.accessToken) {
+      chrome.storage.local.set({ authAccessToken: msg.accessToken, authRefreshToken: msg.refreshToken || "" });
+      fetch(SUPABASE_URL + "/auth/v1/user", {
+        headers: { Authorization: "Bearer " + msg.accessToken, apikey: SUPABASE_ANON_KEY }
+      }).then(r => r.json()).then(user => {
+        chrome.storage.local.set({ authUserEmail: user.email || "" });
+        if (_oauthResolve) { _oauthResolve({ accessToken: msg.accessToken, email: user.email }); _oauthResolve = null; }
+        sendResponse({ success: true, email: user.email });
+      }).catch(() => {
+        if (_oauthResolve) { _oauthResolve({ accessToken: msg.accessToken, email: "" }); _oauthResolve = null; }
+        sendResponse({ success: true });
+      });
+    } else {
+      sendResponse({ success: false });
+    }
+    return true;
+  }
+
+  // 인증 상태 확인 + API 키 로딩
+  if (msg.type === "get-auth-config") {
+    (async () => {
+      const token = await getValidToken();
+      if (!token) {
+        sendResponse({ authenticated: false });
+        return;
+      }
+      const email = await new Promise(r => chrome.storage.local.get("authUserEmail", res => r(res.authUserEmail || "")));
+      // settings에서 OpenAI 키 등 로딩
+      const settings = await fetchAuthSettings(token);
+      if (!settings) {
+        sendResponse({ authenticated: false, error: "설정 로딩 실패" });
+        return;
+      }
+      sendResponse({
+        authenticated: true,
+        email: email,
+        supabaseUrl: SUPABASE_URL,
+        supabaseKey: SUPABASE_ANON_KEY,
+        accessToken: token,
+        openaiKey: settings.openai_key || "",
+        employeeMap: settings.employee_map || "",
+      });
+    })();
+    return true;
+  }
+
   if (msg.type === "reload-extension") {
-    // 플래그 저장 후 확장프로그램 리로드 → 재시작 시 탭 새로고침
     chrome.storage.local.set({ pendingTabReload: true }, () => {
       chrome.runtime.reload();
     });
+    return;
+  }
+
+  if (msg.type === "trigger-update") {
+    // content script에서 토스트 클릭 → 알림 클릭과 동일한 업데이트 흐름
+    chrome.notifications.clear("version-update");
+    (async () => {
+      try {
+        const dlData = await supaRest("GET", "settings", "select=value&key=eq.download_url");
+        const downloadUrl = dlData && dlData[0] && dlData[0].value;
+        if (!downloadUrl) {
+          chrome.storage.local.set({ pendingTabReload: true }, () => chrome.runtime.reload());
+          return;
+        }
+        chrome.runtime.sendNativeMessage("com.jungsem.messenger", {
+          action: "update", downloadUrl, targetDir: "C:\\extension"
+        }, (response) => {
+          chrome.storage.local.set({ pendingTabReload: true }, () => chrome.runtime.reload());
+        });
+      } catch (e) {
+        chrome.storage.local.set({ pendingTabReload: true }, () => chrome.runtime.reload());
+      }
+    })();
     return;
   }
 
@@ -307,6 +522,46 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       sendResponse({ scheduledTime: alarm ? alarm.scheduledTime : null });
     });
     return true; // async sendResponse
+  }
+
+  // ─── Supabase 프록시 쿼리 (content script → background fetch) ───
+  if (msg.type === "supabase-query") {
+    (async () => {
+      try {
+        const { url, key } = await getKeys();
+        const authToken = await getValidToken();
+        const headers = {
+          apikey: key,
+          Authorization: "Bearer " + (authToken || key),
+          "Content-Type": "application/json",
+        };
+        if (msg.method === "POST") headers["Prefer"] = "return=representation";
+        if (msg.isSingle) headers["Accept"] = "application/vnd.pgrst.object+json";
+
+        let endpoint = url + "/rest/v1/" + msg.table;
+        if (msg.params && msg.params.length > 0) endpoint += "?" + msg.params.join("&");
+
+        const res = await fetch(endpoint, {
+          method: msg.method,
+          headers,
+          body: msg.body ? JSON.stringify(msg.body) : undefined,
+        });
+
+        if (!res.ok) {
+          const t = await res.text().catch(() => "");
+          sendResponse({ data: null, error: { message: t, code: String(res.status) } });
+          return;
+        }
+        const ct = res.headers.get("content-type") || "";
+        if (msg.method === "DELETE" && !ct.includes("json")) { sendResponse({ data: null, error: null }); return; }
+        if (msg.method === "PATCH" && !msg.wantReturn && !ct.includes("json")) { sendResponse({ data: null, error: null }); return; }
+        const d = await res.json().catch(() => null);
+        sendResponse({ data: d, error: null });
+      } catch (e) {
+        sendResponse({ data: null, error: { message: e.message } });
+      }
+    })();
+    return true;
   }
 
   // 거래처 폴더 열기 (네이티브 메시징)

@@ -11,6 +11,47 @@
   let OPENAI_KEY = "";
   let supabase = null;
 
+  // ─── Supabase 프록시 클라이언트 (background.js 경유) ───
+  function createProxyClient() {
+    function from(table) {
+      let method = "GET", params = [], body = null, isSingle = false, wantReturn = false;
+      const b = {
+        select(cols) { if (cols) params.push("select=" + encodeURIComponent(cols)); else params.push("select=*"); method = method === "GET" ? "GET" : method; wantReturn = true; return b; },
+        eq(col, val) { params.push(encodeURIComponent(col) + "=eq." + encodeURIComponent(val)); return b; },
+        neq(col, val) { params.push(encodeURIComponent(col) + "=neq." + encodeURIComponent(val)); return b; },
+        gt(col, val) { params.push(encodeURIComponent(col) + "=gt." + encodeURIComponent(val)); return b; },
+        gte(col, val) { params.push(encodeURIComponent(col) + "=gte." + encodeURIComponent(val)); return b; },
+        lt(col, val) { params.push(encodeURIComponent(col) + "=lt." + encodeURIComponent(val)); return b; },
+        lte(col, val) { params.push(encodeURIComponent(col) + "=lte." + encodeURIComponent(val)); return b; },
+        is(col, val) { params.push(encodeURIComponent(col) + "=is." + val); return b; },
+        in(col, vals) { params.push(encodeURIComponent(col) + "=in.(" + vals.map(v => encodeURIComponent(v)).join(",") + ")"); return b; },
+        not(col, op, val) { params.push(encodeURIComponent(col) + "=not." + op + "." + encodeURIComponent(val)); return b; },
+        or(expr) { params.push("or=(" + expr + ")"); return b; },
+        order(col, opts) { params.push("order=" + encodeURIComponent(col) + "." + (opts && opts.ascending === false ? "desc" : "asc")); return b; },
+        limit(n) { params.push("limit=" + n); return b; },
+        single() { isSingle = true; return b; },
+        insert(data) { method = "POST"; body = data; return b; },
+        update(data) { method = "PATCH"; body = data; return b; },
+        delete() { method = "DELETE"; return b; },
+        upsert(data) { method = "POST"; body = data; return b; },
+        then(resolve, reject) {
+          chrome.runtime.sendMessage({
+            type: "supabase-query",
+            table, method, params, body, isSingle, wantReturn,
+          }, (res) => {
+            if (chrome.runtime.lastError) {
+              resolve({ data: null, error: { message: chrome.runtime.lastError.message } });
+            } else {
+              resolve(res || { data: null, error: { message: "no response" } });
+            }
+          });
+        },
+      };
+      return b;
+    }
+    return { from };
+  }
+
   // ─── 로그인 이메일 → 직원 이름 매핑 ───
   let currentEmployeeName = "";
   function detectCurrentEmployee() {
@@ -44,17 +85,51 @@
   }
 
   async function loadApiKeys() {
+    // 인증 기반 설정 로딩 시도
+    const authConfig = await new Promise((r) => chrome.runtime.sendMessage({ type: "get-auth-config" }, r));
+    if (authConfig && authConfig.authenticated && authConfig.openaiKey) {
+      SUPABASE_URL = authConfig.supabaseUrl;
+      SUPABASE_KEY = authConfig.supabaseKey;
+      OPENAI_KEY = authConfig.openaiKey;
+      // 이메일 기반 직원 이름 설정
+      if (authConfig.employeeMap) {
+        chrome.storage.local.set({ employeeMap: authConfig.employeeMap });
+      }
+      supabase = createProxyClient();
+      return true;
+    }
+    // fallback: 옵션 페이지에서 수동 입력된 값 사용
     return new Promise((resolve) => {
       chrome.storage.local.get(["supabaseUrl", "supabaseKey", "openaiKey"], (result) => {
         SUPABASE_URL = result.supabaseUrl || "";
         SUPABASE_KEY = result.supabaseKey || "";
         OPENAI_KEY = result.openaiKey || "";
         if (!SUPABASE_URL || !SUPABASE_KEY || !OPENAI_KEY) {
-          alert("API 키가 설정되지 않았습니다.\n확장 프로그램 옵션 페이지에서 API 키를 먼저 등록해주세요.\n\n(확장 프로그램 아이콘 우클릭 → 옵션)");
+          // 로그인 안내
+          const loginDiv = document.createElement("div");
+          Object.assign(loginDiv.style, {
+            position: "fixed", bottom: "20px", right: "20px", zIndex: "9999999",
+            background: "linear-gradient(135deg, #6366f1, #8b5cf6)", color: "white",
+            padding: "16px 24px", borderRadius: "12px", cursor: "pointer",
+            boxShadow: "0 4px 20px rgba(99,102,241,0.4)", fontSize: "14px", fontWeight: "600",
+          });
+          loginDiv.textContent = "채널에이전트 로그인이 필요합니다 — 클릭";
+          loginDiv.addEventListener("click", () => {
+            chrome.runtime.sendMessage({ type: "google-login" }, (res) => {
+              if (res && res.success) {
+                loginDiv.remove();
+                location.reload();
+              } else {
+                loginDiv.textContent = "로그인 실패: " + (res?.error || "알 수 없음");
+                setTimeout(() => { loginDiv.textContent = "채널에이전트 로그인이 필요합니다 — 클릭"; }, 3000);
+              }
+            });
+          });
+          document.body.appendChild(loginDiv);
           resolve(false);
           return;
         }
-        supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+        supabase = createProxyClient();
         resolve(true);
       });
     });
@@ -587,6 +662,7 @@
   const pendingMessages = []; // dbDedupReady 전에 감지된 메시지 임시 저장
   const savingKeys = new Set(); // 저장 진행 중인 키 (비동기 중복 방지)
   let msgSeqCounter = 0; // DOM 순서 보존용 시퀀스
+  let initialScanDone = false; // 초기 스캔 완료 여부 (완료 전에는 디바운스 AI 호출 안 함)
   async function onMessageDetected(senderType, senderName, content, sentTime) {
     if (!dbDedupReady) {
       pendingMessages.push({ senderType, senderName, content, sentTime });
@@ -625,15 +701,17 @@
     savingKeys.delete(key); // 락 해제
 
     if (senderType === "customer") {
-      // 고객 메시지 → AI 분석 예약 (디바운스)
-      if (aiDebounceTimer) clearTimeout(aiDebounceTimer);
-      aiDebounceTimer = setTimeout(() => {
-        aiDebounceTimer = null;
-        tryTriggerAI();
-      }, 1500);
+      // 고객 메시지 → AI 분석 예약 (디바운스) — 초기 스캔 중에는 스킵 (스캔 완료 후 DB 기준 판단)
+      if (initialScanDone) {
+        if (aiDebounceTimer) clearTimeout(aiDebounceTimer);
+        aiDebounceTimer = setTimeout(() => {
+          aiDebounceTimer = null;
+          tryTriggerAI();
+        }, 1500);
+      }
     } else if (senderType === "agent") {
-      // 상담원이 응답했으면 대기 중인 AI 호출 취소
-      if (aiDebounceTimer) {
+      // 상담원이 응답했으면 대기 중인 AI 호출 취소 (초기 스캔 중에는 DB 기준으로 판단하므로 스킵)
+      if (initialScanDone && aiDebounceTimer) {
         clearTimeout(aiDebounceTimer);
         aiDebounceTimer = null;
         console.log("[AI] 상담원 응답 감지 → AI 호출 취소");
@@ -866,17 +944,41 @@
         feedbackText = await loadFeedbackCached(clientCode, clientName);
       } catch (e) { console.warn("[AI] 피드백 로드 실패:", e.message); }
 
-      const todoPrompt = `고객의 새 메시지 전체를 보고, 직원이 처리해야 할 업무를 1건으로 요약하세요.
+      // 기존 pending todo 목록 조회 (같은 거래처)
+      let existingTodoList = [];
+      try {
+        const sevenDaysAgo = new Date(Date.now() + 9 * 60 * 60 * 1000 - 7 * 24 * 60 * 60 * 1000).toISOString();
+        const { data: etd } = await supabase
+          .from("todos")
+          .select("id, content")
+          .eq("client_code", clientCode)
+          .eq("status", "pending")
+          .gte("created_at", sevenDaysAgo);
+        existingTodoList = etd || [];
+      } catch (e) { /* ignore */ }
 
+      const existingTodoText = existingTodoList.length > 0
+        ? "\n\n기존 pending 할일 목록:\n" + existingTodoList.map(t => `[ID:${t.id}] ${t.content}`).join("\n")
+        : "";
+
+      const todoPrompt = `고객의 새 메시지를 보고, 직원이 처리해야 할 업무를 판단하세요.
+${existingTodoText}
 새 메시지:
 ${newMsgText}
 
-JSON으로 응답: { "todos": ["요약된 업무 1건"] }
+JSON으로 응답:
+- 기존 할일과 맥락상 같은 건이면: { "merge_id": 기존할일ID, "todos": [] }
+- 새로운 업무면: { "merge_id": null, "todos": ["요약된 업무 1건"] }
 규칙:
-- 여러 요청이 있으면 하나로 합쳐서 요약 (예: "부가가치세 과세표준증명 3개년 + 재무제표확인원 전달")
+- ★★★ merge 우선: 같은 주제/사안에 대한 메시지는 반드시 기존 할일로 merge ★★★
+  예: "해임 처리 확인" + "해임 내역 반영 확인" + "해임 일자 조정" → 모두 같은 건 (merge)
+  예: "원천세 납부" + "지방세 납부" + "납부서 재전송" → 모두 같은 건 (merge)
+- 기존 할일의 키워드와 새 메시지의 키워드가 겹치면 merge
+- 완전히 다른 주제(예: "해임"과 "급여명세서")만 별도 todo
+- 여러 요청이 있으면 하나로 합쳐서 요약
 - 최대 1건만
 - 질문/인사/감사는 제외
-- 없으면 빈배열`;
+- 업무가 없으면 { "merge_id": null, "todos": [] }`;
 
       const replyPrompt = `너는 세무사사무실 직원이야. 거래처(고객사) 담당자가 카카오톡으로 문의하면 답변을 추천해줘.
 ${feedbackText ? "\n★★★ 최우선 참고사항 (아래 코멘트/좋은답변이 프롬프트 규칙보다 우선함. 코멘트와 규칙이 충돌하면 코멘트를 따를 것) ★★★" + feedbackText + "\n" : ""}
@@ -938,48 +1040,75 @@ JSON 응답 형식: {"replies":["여기에 실제 답변 내용"]}
       const todoPromise = replyOnly ? Promise.resolve() : fetchAI(todoPrompt, "To-Do API", 800, "gpt-4.1-nano").then(async (r) => {
         const sec = ((Date.now() - startTime) / 1000).toFixed(1);
         todoTokens = r._usage?.total_tokens || 0;
-        console.log("[AI] To-Do API 완료 (" + sec + "초) — 결과:", r.todos?.length || 0, "건, 토큰:", todoTokens);
+        const mergeId = r.merge_id || null;
         const todos = r.todos || [];
-        if (todos.length > 0) {
-          const empName = currentEmployeeName;
-          const { clientCode, clientName } = parseClientInfo();
-          // 기존 To-Do 조회 (같은 거래처의 pending 항목)
-          // 중복 체크: 담당자 무관, 최근 7일 이내 모든 todo 대상
-          const sevenDaysAgo = new Date(Date.now() + 9 * 60 * 60 * 1000 - 7 * 24 * 60 * 60 * 1000).toISOString();
-          const { data: existingTodos } = await supabase
-            .from("todos")
-            .select("content")
-            .eq("client_code", clientCode)
-            .gte("created_at", sevenDaysAgo);
-          const existingList = (existingTodos || []).map(t => t.content.replace(/\s+/g, ""));
+        console.log("[AI] To-Do API 완료 (" + sec + "초) — merge_id:", mergeId, ", 새 todo:", todos.length + "건, 토큰:", todoTokens);
 
-          let savedCount = 0;
-          for (const todo of todos) {
-            // 중복 체크: 공백 제거 후 완전일치 또는 70% 이상 포함 시 스킵
-            const normTodo = todo.replace(/\s+/g, "");
-            const isDup = existingList.some(ex => {
-              if (ex === normTodo) return true;
-              // 짧은 쪽이 긴 쪽에 70% 이상 포함되면 중복
-              const shorter = ex.length < normTodo.length ? ex : normTodo;
-              const longer = ex.length < normTodo.length ? normTodo : ex;
-              return longer.includes(shorter.substring(0, Math.floor(shorter.length * 0.7)));
-            });
-            if (isDup) {
-              console.log("[AI] To-Do 중복 스킵:", todo.substring(0, 40));
-              continue;
-            }
-            const messageIdStr = unansweredIds.length > 0 ? unansweredIds.join(".") : null;
-            await supabase.from("todos").insert({
-              chat_id: chatId, content: todo, status: "pending", assigned_to: empName,
-              client_code: clientCode, client_name: clientName,
-              message_id: messageIdStr, source_type: "ai_auto",
-            });
-            savedCount++;
-          }
-          console.log("[AI] To-Do 저장:", savedCount + "건 (중복 제외)", "담당:", empName);
-          if (savedCount > 0) {
+        const messageIdStr = unansweredIds.length > 0 ? unansweredIds.join(".") : null;
+
+        // 기존 todo에 merge (같은 건)
+        if (mergeId && messageIdStr) {
+          const target = existingTodoList.find(t => t.id === mergeId);
+          if (target) {
+            // 기존 message_id에 새 message_id 추가
+            const { data: current } = await supabase.from("todos").select("message_id").eq("id", mergeId).single();
+            const existingMids = (current?.message_id || "").split(".").filter(Boolean);
+            const newMids = messageIdStr.split(".").filter(Boolean);
+            const merged = [...new Set([...existingMids, ...newMids])].join(".");
+            await supabase.from("todos").update({ message_id: merged || null }).eq("id", mergeId);
+            console.log("[AI] To-Do merge: id=" + mergeId + " ← message_id 추가:", merged);
             unansweredIds.forEach(id => todoMsgIds.add(String(id)));
             refreshBubbleBadges();
+          } else {
+            console.log("[AI] To-Do merge 대상 없음 (id:", mergeId, ") → 새로 생성");
+            // fallback: 새로 생성
+            if (todos.length === 0) todos.push("관련 업무 처리");
+          }
+        }
+
+        // 새 todo 생성 (AI가 merge 안 했을 때 fallback 유사도 체크)
+        if (todos.length > 0 && !mergeId) {
+          // fallback: 기존 todo와 키워드 유사도 체크
+          let fallbackMergeId = null;
+          if (existingTodoList.length > 0) {
+            const extractKeywords = (s) => s.replace(/[^가-힣a-zA-Z0-9]/g, " ").split(/\s+/).filter(w => w.length >= 2);
+            const newKw = extractKeywords(todos[0]);
+            let bestScore = 0;
+            for (const et of existingTodoList) {
+              const existKw = extractKeywords(et.content);
+              const overlap = newKw.filter(w => existKw.some(ew => ew.includes(w) || w.includes(ew))).length;
+              const score = overlap / Math.max(newKw.length, 1);
+              if (score > bestScore) { bestScore = score; fallbackMergeId = et.id; }
+            }
+            if (bestScore < 0.3) fallbackMergeId = null; // 30% 미만이면 새로 생성
+          }
+
+          if (fallbackMergeId && messageIdStr) {
+            // fallback merge
+            const { data: current } = await supabase.from("todos").select("message_id").eq("id", fallbackMergeId).single();
+            const existingMids = (current?.message_id || "").split(".").filter(Boolean);
+            const newMids = messageIdStr.split(".").filter(Boolean);
+            const merged = [...new Set([...existingMids, ...newMids])].join(".");
+            await supabase.from("todos").update({ message_id: merged || null }).eq("id", fallbackMergeId);
+            console.log("[AI] To-Do fallback merge: id=" + fallbackMergeId + " ← 키워드 유사도 매칭");
+            unansweredIds.forEach(id => todoMsgIds.add(String(id)));
+            refreshBubbleBadges();
+          } else {
+            const empName = currentEmployeeName;
+            let savedCount = 0;
+            for (const todo of todos) {
+              await supabase.from("todos").insert({
+                chat_id: chatId, content: todo, status: "pending", assigned_to: empName,
+                client_code: clientCode, client_name: clientName,
+                message_id: messageIdStr, source_type: "ai_auto",
+              });
+              savedCount++;
+            }
+            console.log("[AI] To-Do 저장:", savedCount + "건", "담당:", empName);
+            if (savedCount > 0) {
+              unansweredIds.forEach(id => todoMsgIds.add(String(id)));
+              refreshBubbleBadges();
+            }
           }
         }
       }).catch((e) => {
@@ -2086,6 +2215,10 @@ JSON: {"is_salary":bool}`;
       } else {
         console.log("[AI] 미응답 고객 메시지 없음 → API 스킵");
       }
+
+      // 초기 스캔 완료 → 이후 실시간 메시지는 디바운스 AI 호출 허용
+      initialScanDone = true;
+      console.log("[AI] 초기 스캔 완료 → 실시간 감지 모드 전환");
 
       // todo/salary의 message_id NULL 백필 (가장 먼저)
       await backfillMessageIds(clientCode);

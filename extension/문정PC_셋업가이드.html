@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>채널에이전트 설치 가이드</title>
+<style>
+  @import url("https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css");
+  body { font-family: 'Pretendard', sans-serif; max-width: 700px; margin: 40px auto; padding: 0 20px; color: #1a1a1a; line-height: 1.7; }
+  h1 { font-size: 24px; border-bottom: 3px solid #6366f1; padding-bottom: 12px; margin-bottom: 32px; }
+  h2 { font-size: 18px; color: #6366f1; margin-top: 36px; margin-bottom: 16px; }
+  ol { padding-left: 24px; }
+  li { margin-bottom: 8px; }
+  code { background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-size: 13px; }
+  hr { border: none; border-top: 1px solid #e2e8f0; margin: 28px 0; }
+  table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 14px; }
+  th, td { border: 1px solid #e2e8f0; padding: 10px 14px; text-align: left; }
+  th { background: #f8fafc; font-weight: 600; }
+  .note { background: #eff6ff; border-left: 4px solid #6366f1; padding: 12px 16px; border-radius: 4px; margin: 16px 0; font-size: 14px; }
+</style>
+</head>
+<body>
+
+<h1>채널에이전트 설치 가이드 (문정 PC)</h1>
+
+<h2>사전 조건</h2>
+<ul>
+  <li>Google Drive 동기화가 되어 있어야 합니다 (extension 폴더 공유됨)</li>
+  <li>Chrome 브라우저가 설치되어 있어야 합니다</li>
+</ul>
+
+<hr>
+
+<h2>1단계: 크롬 확장 프로그램 로드</h2>
+<ol>
+  <li>Chrome 주소창에 <code>chrome://extensions/</code> 입력</li>
+  <li>우측 상단 <strong>"개발자 모드"</strong> 토글 켜기</li>
+  <li><strong>"압축해제된 확장 프로그램을 로드합니다"</strong> 클릭</li>
+  <li>폴더 선택: <code>C:\Users\taxju\OneDrive\Desktop\GDRIVE\projects\extension</code></li>
+  <li>확장 프로그램 ID가 <code>febheajklmkbakaolobeamnffdakoida</code>인지 확인</li>
+</ol>
+
+<hr>
+
+<h2>2단계: Native Messaging Host 설치</h2>
+<ol>
+  <li>파일 탐색기에서 <code>C:\Users\taxju\OneDrive\Desktop\GDRIVE\projects\extension</code> 폴더 열기</li>
+  <li><strong><code>install_host.bat</code></strong> 더블클릭</li>
+  <li>창이 뜨고 자동으로 설치 완료됨</li>
+</ol>
+
+<hr>
+
+<h2>3단계: Chrome 재시작</h2>
+<div class="note">
+  탭 닫기가 아니라 Chrome을 <strong>완전히 종료</strong> 후 다시 열어야 합니다.
+</div>
+
+<hr>
+
+<h2>4단계: 확장 프로그램 설정</h2>
+<ol>
+  <li>Chrome 우측 상단 퍼즐 아이콘 클릭</li>
+  <li>"채널에이전트" 옆 점 세 개 클릭 → <strong>옵션</strong></li>
+  <li><strong>"Google 로그인"</strong> 버튼 클릭 → <code>kangmj980124@gmail.com</code> 계정으로 로그인</li>
+  <li><strong>거래처 폴더 경로</strong> 입력 (예: <code>C:\Users\taxju\OneDrive\Desktop\GDRIVE\거래처</code>)</li>
+  <li><strong>"저장하기"</strong> 클릭</li>
+</ol>
+
+<hr>
+
+<h2>5단계: 동작 확인</h2>
+<ol>
+  <li><code>https://center-pf.kakao.com/</code> 접속</li>
+  <li>채팅 페이지 → AI 버튼들이 나타나면 정상</li>
+  <li>상담 목록 페이지 → 사이드바 할일 목록이 나타나면 정상</li>
+</ol>
+
+<hr>
+
+<h2>문제 발생 시</h2>
+<table>
+  <tr><th>증상</th><th>해결 방법</th></tr>
+  <tr><td>AI 버튼 안 나옴</td><td>확장 프로그램이 활성화돼 있는지 확인</td></tr>
+  <tr><td>로그인 실패</td><td>정권에게 문의</td></tr>
+  <tr><td>폴더 열기 안 됨</td><td>install_host.bat 다시 실행 후 Chrome 재시작</td></tr>
+  <tr><td>API 응답 없음</td><td>옵션 페이지에서 로그인 상태 확인 (초록색 = 정상)</td></tr>
+</table>
+
+</body>
+</html>

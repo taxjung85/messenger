@@ -1,9 +1,9 @@
 ﻿{
-    "path":  "C:\\GoogleDrive\\projects\\extension\\native_host.bat",
+    "path":  "C:\\extension\\native_host.bat",
     "description":  "Jungsem Messenger Native Host",
     "name":  "com.jungsem.messenger",
     "allowed_origins":  [
-                            "chrome-extension://glmapefmcmhaegbgniaakkffiokilacc/"
+                            "chrome-extension://kombcjpmcbmglgjelkbeaadajcdgnkkp/"
                         ],
     "type":  "stdio"
 }
