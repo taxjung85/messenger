@@ -1256,6 +1256,9 @@
       updateCountdown();
       countdownInterval = setInterval(updateCountdown, 1000);
 
+      // 접속 시 버전 체크 요청
+      chrome.runtime.sendMessage({ type: "check-version" });
+
       // background에서 알람 발생 시 자동 갱신
       chrome.runtime.onMessage.addListener((msg) => {
         if (msg.type === "next-alarm") {

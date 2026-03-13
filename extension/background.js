@@ -487,6 +487,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 
+  if (msg.type === "check-version") {
+    checkVersionUpdate();
+    return;
+  }
+
   if (msg.type === "reload-extension") {
     chrome.storage.local.set({ pendingTabReload: true }, () => {
       chrome.runtime.reload();

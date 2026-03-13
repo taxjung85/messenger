@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "채널에이전트",
   "description": "카카오톡 채널 관리자 센터 업무 보조 에이전트",
-  "version": "1.6",
+  "version": "1.6.1",
   "permissions": [
     "activeTab",
     "alarms",
