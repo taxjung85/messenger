@@ -68,6 +68,29 @@ switch ($msg.action) {
             Send-Response @{ success = $false; error = $_.Exception.Message }
         }
     }
+    "update" {
+        $url = $msg.downloadUrl
+        $targetDir = $msg.targetDir
+        if (-not $url) {
+            Send-Response @{ success = $false; error = "downloadUrl 없음" }
+            return
+        }
+        if (-not $targetDir) { $targetDir = "C:\extension" }
+        try {
+            $tmp = [System.IO.Path]::GetTempFileName() + ".zip"
+            $wc = New-Object System.Net.WebClient
+            $wc.Headers.Add("User-Agent", "Mozilla/5.0")
+            $wc.DownloadFile($url, $tmp)
+            # 기존 폴더 삭제 후 압축 해제
+            if (Test-Path $targetDir) { Remove-Item $targetDir -Recurse -Force }
+            Add-Type -AssemblyName System.IO.Compression.FileSystem
+            [System.IO.Compression.ZipFile]::ExtractToDirectory($tmp, (Split-Path $targetDir -Parent))
+            Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+            Send-Response @{ success = $true; path = $targetDir }
+        } catch {
+            Send-Response @{ success = $false; error = $_.Exception.Message }
+        }
+    }
     "ping" {
         Send-Response @{ success = $true; message = "pong" }
     }
