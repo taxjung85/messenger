@@ -1199,7 +1199,11 @@
             color: "white", background: "linear-gradient(135deg,#6366f1,#8b5cf6)",
             boxShadow: "0 4px 16px rgba(99,102,241,0.35)", cursor: "pointer",
           });
-          toast.addEventListener("click", () => chrome.runtime.sendMessage({ type: "reload-extension" }));
+          toast.addEventListener("click", () => {
+            toast.innerHTML = '⏳ 업데이트 중...';
+            toast.style.pointerEvents = 'none';
+            chrome.runtime.sendMessage({ type: "trigger-update" });
+          });
           document.body.appendChild(toast);
         }
       } catch (e) {}
