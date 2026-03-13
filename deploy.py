@@ -100,9 +100,7 @@ finally:
 # ─── 5. 로컬 확장 폴더에 복사 (Chrome 유지용) ───
 local_ext = r"C:\extension"
 try:
-    if os.path.exists(local_ext):
-        shutil.rmtree(local_ext)
-    shutil.copytree(src_ext, local_ext)
+    shutil.copytree(src_ext, local_ext, dirs_exist_ok=True)
     print(f"[5/5] C:\\extension\\ 복사 완료")
 except Exception as e:
     print(f"[5/5] 로컬 복사 실패: {e}")
