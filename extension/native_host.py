@@ -73,7 +73,9 @@ def main():
             return
         try:
             tmp = tempfile.mktemp(suffix='.zip')
-            urllib.request.urlretrieve(download_url, tmp)
+            req = urllib.request.Request(download_url, headers={'User-Agent': 'Mozilla/5.0'})
+            with urllib.request.urlopen(req) as resp, open(tmp, 'wb') as f:
+                f.write(resp.read())
             if os.path.exists(target_dir):
                 shutil.rmtree(target_dir)
             with zipfile.ZipFile(tmp, 'r') as zf:
